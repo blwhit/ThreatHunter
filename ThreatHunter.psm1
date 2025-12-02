@@ -29,27 +29,44 @@
 # - add path filtering/searching to Hunt-Tasks
 # - review logic for getting the hash of the executable vs the scriptFile... make sure its sound and expected output... sometimes fields are getting mixed up...
 # - review CSV outputs for all Forensic Dump data...
+
+
+
+#   HUNT-FORENSICDUMP (future options):
+# =====================
+# - could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
+# - Consider reordering tabs in importance/likelihood of usage
+# - take the extra space printing out of the Hunt-Browser execution for the forensic dump... printing an extra newline, not clean
+# - add a base64 string of the Compressed Arrchive of all EVTX logs? That way you will always have all event logs..... is this possible?
+# ---------------------------------------------
+# - validate "LoadFromJson" switch manually and use the switch-- test it in VM
+# - research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... 
+
+#   HUNT-FILES:
+# =====================
+# - add caching like hunt-logs, so users can make subsequent searches (add dont cache switch???)
+
+#   HUNT-BROWSER:
+# =====================
+
+#   HUNT-LOGS:
+# =====================
+
+#   HUNT-PERSISTENCE:
+# =====================
+# - Hunt-Persistence: fix registry dismounting, and understand consequences -- "WARNING: Failed to dismount TEMP_DFIR_"
+# - Hunt-Persistence: Fix why in "All" mode, the flags are not all being set right.... only certain flags are being set (missing bad signatures/etc.)...
+# - Hunt-Persistence: Change it to try and look for NTUSER.DAT files as well, so it loads all registry hives and searches all users in 'HKEY Users'... make sure we are always searching all users
 # - Hunt-Persistence path errors.. error building paths for some reason... consider 'test-path' validations, etc.. 
 # - Hunt-Persistence ".json" vs ".js" extensions need seperated/fixed
 # - Hunt-Persistence: General review of the logic. Review and make sure we are able to return ALL persistence objects if needed... verify that ALL get returned-- vaildate results...
-# - Hunt-Logs: Need to change the 'Highlight' vs 'Match' field colors. They are both red and clashing together, not cleanly readable.
+# - add caching? like in the other functions (add dont cache switch???)
 
 
-# Forensic Dump (future options)
-# -------------
-# - could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
-# - cross reference and fix the flagging logic in ForensicDump... its using deafult criticality levels... not proper or by design... fix logic to run and display all native flags direct from cmdlet..
-# - research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc....
-# - Consider reordering tabs in importance/likelihood of usage
-# - take the extra space printing out of the Hunt-Browser execution for the forensic dump... printing an extra newline, not clean
-# - edit logo a bit... simplify or color.. etc.....
-# - report is kind of loading slow.. look for optimization....
-# - browser extensions redirection and "View in Tab" not working right.... need to fix this stil....
-# - validate "LoadFromJson" switch
 
 
-#   Final/Full Review & Pass-Through
-# -----------------------------
+#   Final/Full Review & Pass-Through of All
+# --------------------------------------------
 # - Review each function: Give full description for wiki page (every parameter and feature), and give examples, and make sure to LIST ANY NECESSARY ASSEMBLY IMPORTS (need this for the module manifest)
 # - Have AI teach you and tell you everything about each subfunction
 # - Learn and document every single function, and every feature inside each function
@@ -158,20 +175,27 @@ function Hunt-ForensicDump {
 
     MODES:
     - Auto Mode (default): Balanced detection with 7-day default range
-    * Focuses on core Windows logs (PowerShell, Security, System, Application)
+    * Focuses on core Windows logs (PowerShell, Security, System, Application, and custom logs)
     * Standard file extensions and persistence locations
     * Excludes system folders to reduce noise
+    * NOTE: Hunt-Persistence always runs in Aggressive mode regardless of ForensicDump mode
     
     - Aggressive Mode: Comprehensive detection with broader scope
     * All available Windows event logs
     * Expanded file extension coverage (more suspicious file types)
     * Includes system folders (Windows, Program Files)
     * More permissive detection rules (higher false positive rate)
+    * Hunt-Persistence runs in Aggressive mode (same as Auto mode)
 
     DATE RANGES:
     - Specify exact dates: -StartDate "2024-01-01" -EndDate "2024-12-31"
     - Relative formats: -StartDate "7D" (7 days), "24H" (24 hours), "30M" (30 minutes)
     - All time: -StartDate "AllTime" or omit -StartDate
+    
+    LOADFROMJSON MODE:
+    - Load previously collected forensic data from JSON files
+    - Useful for regenerating HTML reports with different settings
+    - Specify path to output directory or JSON_Files subfolder
     
     .PARAMETER StartDate
     Start date for searches. Accepts datetime, relative formats (3D, 24H), or 'AllTime'.
@@ -237,6 +261,21 @@ function Hunt-ForensicDump {
     .EXAMPLE
     Hunt-ForensicDump -LoadBrowserTool -LoadToolPath "C:\Tools\BrowsingHistoryView.exe" -StartDate "7D"
     Uses local BrowsingHistoryView executable for browser history extraction.
+    
+    .EXAMPLE
+    Hunt-ForensicDump -LoadFromJson "C:\ForensicDump_PC01_20250115\JSON_Files"
+    Loads previously collected JSON data and regenerates HTML report.
+    
+    .EXAMPLE
+    Hunt-ForensicDump -LoadFromJson ".\ForensicDump_PC01_20250115" -MaxRows 5000
+    Loads JSON data from relative path and limits HTML display to 5000 rows per table.
+    
+    .NOTES
+    - Hunt-Persistence runs without -Aggressive flag (preserves original flags from function)
+    - LoadFromJson mode bypasses data collection and regenerates HTML reports from existing JSON
+    - Use -LoadBrowserTool for most accurate browser history extraction (downloads NirSoft tool)
+    - LoadToolPath parameter requires -LoadBrowserTool switch to be effective
+    - MaxRows=0 displays all embedded data (may impact browser performance with large datasets)
     #>
     [CmdletBinding()]
     param(
@@ -2405,17 +2444,32 @@ function Hunt-ForensicDump {
             'services.json'    = $ForensicData.Services
             'tasks.json'       = $ForensicData.Tasks
             'files.json'       = $ForensicData.Files.All
+            'registry.json'    = $ForensicData.Registry
+            'systeminfo.json'  = $ForensicData.SystemInfo
         }
     
         foreach ($file in $exports.Keys) {
             try {
                 $data = $exports[$file]
-                if ($data -and $data.Count -gt 0) {
-                    $jsonPath = Join-Path $jsonDir $file
-                    $limitedData = $data
-                    $jsonContent = $limitedData | ConvertTo-Json -Depth 3 -Compress -ErrorAction Stop
-                    $jsonContent | Out-File -FilePath $jsonPath -Encoding UTF8 -ErrorAction Stop
-                    Write-Host "  [-] Exported $file ($($limitedData.Count) records)" -ForegroundColor DarkGray
+                if ($null -ne $data) {
+                    # Handle different data types
+                    $recordCount = 0
+                    if ($data -is [array]) {
+                        $recordCount = $data.Count
+                    }
+                    elseif ($data -is [hashtable] -or $data -is [PSCustomObject]) {
+                        $recordCount = 1
+                    }
+                    
+                    if ($recordCount -gt 0) {
+                        $jsonPath = Join-Path $jsonDir $file
+                        $limitedData = $data
+                        
+                        # Use Depth 2 for better performance while maintaining data integrity
+                        $jsonContent = $limitedData | ConvertTo-Json -Depth 2 -Compress -ErrorAction Stop
+                        $jsonContent | Out-File -FilePath $jsonPath -Encoding UTF8 -ErrorAction Stop
+                        Write-Host "  [-] Exported $file ($recordCount records)" -ForegroundColor DarkGray
+                    }
                 }
             }
             catch {
@@ -2436,6 +2490,43 @@ function Hunt-ForensicDump {
             [int]$MaxRows = 0,
             [switch]$AllFields
         )
+        
+
+        # Helper function to safely encode JavaScript strings
+        function ConvertTo-SafeJsString {
+            param([object]$Value)
+        
+            if ($null -eq $Value -or [string]::IsNullOrWhiteSpace($Value.ToString())) {
+                return ""
+            }
+        
+            try {
+                # Convert to string first, then encode
+                $strValue = $Value.ToString()
+                return [System.Web.HttpUtility]::JavaScriptStringEncode($strValue)
+            }
+            catch {
+                # Fallback: manual escaping if JavaScriptStringEncode fails
+                $strValue = $Value.ToString()
+                $strValue = $strValue -replace '\\', '\\'
+                $strValue = $strValue -replace "'", "\'"
+                $strValue = $strValue -replace '"', '\"'
+                $strValue = $strValue -replace "`n", '\n'
+                $strValue = $strValue -replace "`r", '\r'
+                $strValue = $strValue -replace "`t", '\t'
+                return $strValue
+            }
+        }
+
+        # Ensure System.Web assembly is loaded
+        try {
+            Add-Type -AssemblyName System.Web
+        }
+        catch {
+            Write-Verbose "System.Web assembly already loaded or unavailable"
+        }
+
+        # HTML generation code starts here
 
         # Load System.Web assembly for HtmlEncode
         try {
@@ -2631,6 +2722,41 @@ function Hunt-ForensicDump {
                             Write-Verbose "Direct access failed for key '$key': $($_.Exception.Message)"
                         }
                     }
+
+                    # Method 3: Clean any enumerator or complex types
+                    if ($null -ne $propValue) {
+                        $propType = $propValue.GetType().Name
+                        
+                        # Handle enumerators and iterators
+                        if ($propType -match 'Enumerator|Iterator') {
+                            try {
+                                # Convert enumerator to array
+                                $propValue = @($propValue)
+                                if ($propValue.Count -eq 0) {
+                                    $propValue = $null
+                                }
+                                elseif ($propValue.Count -eq 1) {
+                                    $propValue = $propValue[0]
+                                }
+                            }
+                            catch {
+                                Write-Verbose "Could not convert enumerator for key '$key'"
+                                $propValue = $null
+                            }
+                        }
+                        
+                        # Convert complex objects to strings for safety
+                        if ($propValue -is [System.Management.Automation.PSCustomObject] -or 
+                            $propValue -is [hashtable]) {
+                            try {
+                                # For nested objects, convert to string representation
+                                $propValue = $propValue | ConvertTo-Json -Depth 1 -Compress -ErrorAction SilentlyContinue
+                            }
+                            catch {
+                                $propValue = $propValue.ToString()
+                            }
+                        }
+                    }
                     
                     # Method 3: Fallback to GetType().GetProperty() for difficult cases
                     if ($null -eq $propValue -and $accessMethod -eq 'none') {
@@ -2680,7 +2806,7 @@ function Hunt-ForensicDump {
                     elseif ($propValue -is [System.Management.Automation.PSObject] -and 
                         $propValue.GetType().Name -notmatch 'PSCustomObject') {
                         # This might be a wrapped object - try to unwrap
-                        Write-Verbose "Unwrapping PSObject for key '$key'"
+                        #Write-Verbose "Unwrapping PSObject for key '$key'"
                         try {
                             $newObj[$key] = $propValue.ToString()
                         }
@@ -2767,16 +2893,16 @@ function Hunt-ForensicDump {
                 if ($json -match 'System\.Collections\.ArrayList' -or 
                     $json -match 'System\.Collections\.Generic\.List.*Enumerator' -or
                     $json -match '\@\{.*Enumerator.*\}') {
-                    Write-Warning "  [!!!] JSON contains .NET type references - POTENTIAL DATA CORRUPTION DETECTED"
-                    Write-Warning "  [!] Type: $Type"
-                    Write-Warning "  [!] Sample: $($json.Substring(0, [Math]::Min(200, $json.Length)))"
+                    Write-Verbose "[DEBUG]  [!!!] JSON contains .NET type references - POTENTIAL DATA CORRUPTION DETECTED"
+                    Write-Verbose "[DEBUG] Type: $Type"
+                    Write-Verbose "[DEBUG] Sample: $($json.Substring(0, [Math]::Min(200, $json.Length)))"
                 
                     # Try to identify which items are corrupted
                     Write-Verbose "Attempting to identify corrupted items in $Type data..."
                 
                     # Don't immediately fail - log it and return what we have
                     # The JavaScript will handle empty data gracefully
-                    Write-Warning "  [!] Continuing with potentially corrupted data - check console for details"
+                    Write-Verbose "[DEBUG] Continuing with potentially corrupted data - check console for details"
                 }
                 
                 # Additional validation: ensure JSON is valid JavaScript
@@ -3591,6 +3717,49 @@ function Hunt-ForensicDump {
         }
         
         .loading { text-align: center; padding: 20px; color: var(--accent-blue); }
+        
+        /* Tab content loading spinner */
+        .tab-loader {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 300px;
+            padding: 40px;
+        }
+        
+        .tab-spinner {
+            width: 50px;
+            height: 50px;
+            position: relative;
+            margin-bottom: 20px;
+        }
+        
+        .tab-spinner-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border: 3px solid transparent;
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: tab-spin 1s linear infinite;
+        }
+        
+        .tab-spinner-ring:nth-child(2) {
+            border-top-color: var(--accent-green);
+            animation-duration: 1.5s;
+            animation-direction: reverse;
+        }
+        
+        @keyframes tab-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .tab-loader-text {
+            color: var(--text-muted);
+            font-size: 0.95em;
+        }
         .error { color: var(--accent-red); padding: 10px; }
         .warning { background: var(--accent-yellow); color: #000; padding: 10px; border-radius: 4px; margin: 10px 0; }
         .table-controls { margin: 10px 0; }
@@ -3731,7 +3900,7 @@ function Hunt-ForensicDump {
     </style>
 </head>
 <body>
-    <!-- Initial page loading overlay -->
+<!-- Initial page loading overlay -->
     <div id="page-loader" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-primary); z-index: 9999; display: flex; align-items: center; justify-content: center; flex-direction: column;">
         <div style="text-align: center;">
             <!-- ThreatHunter Multi-Module Hunt Radar -->
@@ -4874,7 +5043,8 @@ $(
     if ($ForensicData.SystemInfo.PSHistory -and $ForensicData.SystemInfo.PSHistory.Count -gt 0) {
         $psJson = "["
         for ($i = 0; $i -lt $ForensicData.SystemInfo.PSHistory.Count; $i++) {
-            $cmd = [System.Web.HttpUtility]::JavaScriptStringEncode($ForensicData.SystemInfo.PSHistory[$i])
+            $cmdRaw = $ForensicData.SystemInfo.PSHistory[$i]
+            $cmd = ConvertTo-SafeJsString $cmdRaw
             $psJson += "{Category:'PowerShell History',Field:'Command',Value:'$cmd',TableRef:'pshistory-table',RowIndex:$i}"
             if ($i -lt $ForensicData.SystemInfo.PSHistory.Count - 1) { $psJson += "," }
         }
@@ -4890,9 +5060,9 @@ $(
         $procLimit = [Math]::Min(500, $ForensicData.SystemInfo.Processes.Count)
         for ($i = 0; $i -lt $procLimit; $i++) {
             $proc = $ForensicData.SystemInfo.Processes[$i]
-            $name = [System.Web.HttpUtility]::JavaScriptStringEncode($proc.ProcessName)
-            $path = if ($proc.Path) { [System.Web.HttpUtility]::JavaScriptStringEncode($proc.Path) } else { "" }
-            $user = if ($proc.UserName) { [System.Web.HttpUtility]::JavaScriptStringEncode($proc.UserName) } else { "" }
+            $name = ConvertTo-SafeJsString $proc.ProcessName
+            $path = ConvertTo-SafeJsString $proc.Path
+            $user = ConvertTo-SafeJsString $proc.UserName
             $procJson += "{Category:'Processes',Field:'$name',Value:'$path $user',TableRef:'process-table',RowIndex:$i}"
             if ($i -lt $procLimit - 1) { $procJson += "," }
         }
@@ -4908,8 +5078,8 @@ $(
         $dnsLimit = [Math]::Min(500, $ForensicData.SystemInfo.DNSCache.Count)
         for ($i = 0; $i -lt $dnsLimit; $i++) {
             $dns = $ForensicData.SystemInfo.DNSCache[$i]
-            $name = if ($dns.Entry) { [System.Web.HttpUtility]::JavaScriptStringEncode($dns.Entry) } elseif ($dns.RecordName) { [System.Web.HttpUtility]::JavaScriptStringEncode($dns.RecordName) } else { "" }
-            $data = if ($dns.Data) { [System.Web.HttpUtility]::JavaScriptStringEncode($dns.Data) } else { "" }
+            $name = if ($dns.Entry) { ConvertTo-SafeJsString $dns.Entry } elseif ($dns.RecordName) { ConvertTo-SafeJsString $dns.RecordName } else { "" }
+            $data = ConvertTo-SafeJsString $dns.Data
             if (![string]::IsNullOrWhiteSpace($name) -or ![string]::IsNullOrWhiteSpace($data)) {
                 $dnsJson += "{Category:'DNS Cache',Field:'$name',Value:'$data',TableRef:'dns-table',RowIndex:$i}"
                 if ($i -lt $dnsLimit - 1) { $dnsJson += "," }
@@ -4941,9 +5111,9 @@ $(
         $swJson = "["
         for ($i = 0; $i -lt $ForensicData.SystemInfo.InstalledSoftware.Count; $i++) {
             $sw = $ForensicData.SystemInfo.InstalledSoftware[$i]
-            $name = [System.Web.HttpUtility]::JavaScriptStringEncode($sw.DisplayName)
-            $pub = if ($sw.Publisher) { [System.Web.HttpUtility]::JavaScriptStringEncode($sw.Publisher) } else { "" }
-            $ver = if ($sw.DisplayVersion) { [System.Web.HttpUtility]::JavaScriptStringEncode($sw.DisplayVersion) } else { "" }
+            $name = ConvertTo-SafeJsString $sw.DisplayName
+            $pub = ConvertTo-SafeJsString $sw.Publisher
+            $ver = ConvertTo-SafeJsString $sw.DisplayVersion
             $swJson += "{Category:'Installed Software',Field:'$name',Value:'$pub $ver',TableRef:'software-table',RowIndex:$i}"
             if ($i -lt $ForensicData.SystemInfo.InstalledSoftware.Count - 1) { $swJson += "," }
         }
@@ -4952,21 +5122,26 @@ $(
     }
 )
         
-        // Add Browser Extensions
+// Add Browser Extensions to browser search data
+        var browserExtensionsData = [];
 $(
     if ($ForensicData.SystemInfo.BrowserExtensions -and $ForensicData.SystemInfo.BrowserExtensions.Count -gt 0) {
+        $sortedExtensionsForSearch = $ForensicData.SystemInfo.BrowserExtensions | Sort-Object -Property Name
+        
         $extJson = "["
-        $extLimit = [Math]::Min(200, $ForensicData.SystemInfo.BrowserExtensions.Count)
+        $extLimit = [Math]::Min(200, $sortedExtensionsForSearch.Count)
         for ($i = 0; $i -lt $extLimit; $i++) {
-            $ext = $ForensicData.SystemInfo.BrowserExtensions[$i]
-            $name = [System.Web.HttpUtility]::JavaScriptStringEncode($ext.Name)
-            $extId = [System.Web.HttpUtility]::JavaScriptStringEncode($ext.ID)
-            $browser = [System.Web.HttpUtility]::JavaScriptStringEncode($ext.Browser)
-            $extJson += "{Category:'Browser Extensions',Field:'$name',Value:'$browser $extId',TableRef:'extensions-table',RowIndex:$i}"
+            $ext = $sortedExtensionsForSearch[$i]
+            $name = ConvertTo-SafeJsString $ext.Name
+            $extId = ConvertTo-SafeJsString $ext.ID
+            $browser = ConvertTo-SafeJsString $ext.Browser
+            $user = ConvertTo-SafeJsString $ext.User
+            
+            $extJson += "{User:'$user',Browser:'$browser',Name:'$name',ID:'$extId',RowIndex:$i}"
             if ($i -lt $extLimit - 1) { $extJson += "," }
         }
-        $extJson += "]"
-        "        systemInfoSearchData = systemInfoSearchData.concat($extJson);`n"
+        $extJson += "];"
+        "        browserExtensionsData = $extJson`n"
     }
 )
         
@@ -4976,8 +5151,8 @@ $(
         $userJson = "["
         for ($i = 0; $i -lt $ForensicData.SystemInfo.AllUserAccounts.Count; $i++) {
             $user = $ForensicData.SystemInfo.AllUserAccounts[$i]
-            $username = [System.Web.HttpUtility]::JavaScriptStringEncode($user.Username)
-            $profile = if ($user.ProfilePath) { [System.Web.HttpUtility]::JavaScriptStringEncode($user.ProfilePath) } else { "" }
+            $username = ConvertTo-SafeJsString $user.Username
+            $profile = ConvertTo-SafeJsString $user.ProfilePath
             $userJson += "{Category:'User Accounts',Field:'$username',Value:'$profile $($user.Type)',TableRef:'users-accounts-table',RowIndex:$i}"
             if ($i -lt $ForensicData.SystemInfo.AllUserAccounts.Count - 1) { $userJson += "," }
         }
@@ -4992,7 +5167,7 @@ $(
         $adapterJson = "["
         for ($i = 0; $i -lt $ForensicData.SystemInfo.NetworkAdapters.Count; $i++) {
             $adapter = $ForensicData.SystemInfo.NetworkAdapters[$i]
-            $name = [System.Web.HttpUtility]::JavaScriptStringEncode($adapter.Name)
+            $name = ConvertTo-SafeJsString $adapter.Name
             $mac = if ($adapter.MacAddress) { $adapter.MacAddress } else { "" }
             $adapterJson += "{Category:'Network Adapters',Field:'$name',Value:'$mac $($adapter.Status)',TableRef:'adapters-table',RowIndex:$i}"
             if ($i -lt $ForensicData.SystemInfo.NetworkAdapters.Count - 1) { $adapterJson += "," }
@@ -5047,10 +5222,20 @@ $(
             
             var dataTypes = ['persistence', 'registry', 'logs', 'browser', 'services', 'tasks', 'files'];
             if (dataTypes.indexOf(tabName) !== -1) {
+                // Show loading spinner while data loads
+                var contentDiv = document.getElementById(tabName + '-content');
+                if (contentDiv && !loadedData[tabName]) {
+                    contentDiv.innerHTML = '<div class="tab-loader"><div class="tab-spinner"><div class="tab-spinner-ring"></div><div class="tab-spinner-ring"></div></div><div class="tab-loader-text">Loading data...</div></div>';
+                }
+                
                 if (tabName === 'logs') {
                     initializeLogProviderSelector();
                 }
-                loadData(tabName);
+                
+                // Use setTimeout to allow spinner to render before loading data
+                setTimeout(function() {
+                    loadData(tabName);
+                }, 50);
             }
         }
 
@@ -5088,6 +5273,18 @@ $(
             var lowerField = fieldName.toLowerCase();
             for (var i = 0; i < hashFields.length; i++) {
                 if (lowerField.indexOf(hashFields[i]) !== -1) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        function isFileNameField(fieldName) {
+            var fileNameFields = ['name', 'filename', 'file'];
+            var lowerField = fieldName.toLowerCase();
+            // Only match exact field names to avoid false positives
+            for (var i = 0; i < fileNameFields.length; i++) {
+                if (lowerField === fileNameFields[i]) {
                     return true;
                 }
             }
@@ -5399,12 +5596,15 @@ $(
                     }
                 }
 
-                // Apply MAX_ROWS limit
-                var fullData = data;
-                var displayData = fullData;
-                if (MAX_ROWS > 0 && fullData.length > MAX_ROWS) {
-                    displayData = fullData.slice(0, MAX_ROWS);
-                }          
+                // Apply MAX_ROWS limit and track original count
+            var originalDataLength = data.length;
+            var fullData = data;
+            var displayData = fullData;
+            var isLimited = false;
+            if (MAX_ROWS > 0 && fullData.length > MAX_ROWS) {
+                displayData = fullData.slice(0, MAX_ROWS);
+                isLimited = true;
+            }          
             var keys = [];
             var keySet = {};
             for (var i = 0; i < displayData.length; i++) {
@@ -5416,10 +5616,18 @@ $(
                 }
             }
             
-            var html = '<div class="record-count">Displaying: ' + displayData.length + ' of ' + data.length + ' records</div>';
+            var totalRecords = originalDataLength;
+            var displayingRecords = displayData.length;
             
-            if (data.length > displayData.length) {
-                html += '<div class="warning">Note: Display limited to first ' + MAX_ROWS + ' records. Adjust in Settings tab or see CSV files for complete data.</div>';
+            var html = '<div class="record-count">Displaying: ' + displayingRecords.toLocaleString() + ' of ' + totalRecords.toLocaleString() + ' records</div>';
+            
+            // Show banner if limited by MAX_ROWS OR if displaying fewer records than total
+            if (isLimited || displayingRecords < totalRecords) {
+                html += '<div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: #fff; padding: 12px 20px; border-radius: 6px; margin: 10px 0; border-left: 4px solid #d35400; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">';
+                html += '<strong> Limited Display:</strong> Showing first ' + displayingRecords.toLocaleString() + ' of ' + totalRecords.toLocaleString() + ' records (' + Math.round((displayingRecords / totalRecords) * 100) + '% of total data). ';
+                html += 'MAX_ROWS setting: ' + (MAX_ROWS === 0 ? 'Unlimited' : MAX_ROWS.toLocaleString()) + '. ';
+                html += 'Adjust in <strong>Settings</strong> tab or download CSV files for complete dataset.';
+                html += '</div>';
             }
             
             html += '<div class="table-controls">';
@@ -5436,6 +5644,10 @@ $(
             
             for (var i = 0; i < displayData.length; i++) {
                 var item = displayData[i];
+                if (!item) {
+                    console.warn('Null item at index ' + i + ' in ' + type);
+                    continue;
+                }
                 html += '<tr>';
                 
                 for (var j = 0; j < keys.length; j++) {
@@ -5475,6 +5687,10 @@ $(
                     } else if (isIPAddress(val)) {
                         val = createIPLink(val);
                         html += '<td>' + val + '</td>';
+                    } else if (type === 'files' && isFileNameField(key)) {
+                        // Don't hyperlink file names - they're not domains or URLs
+                        var escaped = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                        html += '<td>' + truncateCell(escaped) + '</td>';
                     } else if (isDomainOrURL(val)) {
                         val = createDomainLink(val);
                         html += '<td>' + val + '</td>';
@@ -5911,6 +6127,64 @@ $(
                     }
                 }
             }
+
+            // Search browser extensions data if scope is 'all' or 'browser'
+            if ((scope === 'all' || scope === 'browser') && browserExtensionsData && browserExtensionsData.length > 0) {
+                for (var bei = 0; bei < browserExtensionsData.length; bei++) {
+                    var extItem = browserExtensionsData[bei];
+                    var matchedFields = [];
+                    
+                    var searchableText = extItem.User + ' ' + extItem.Browser + ' ' + extItem.Name + ' ' + extItem.ID;
+                    searchableText = searchableText.replace(/\s+/g, ' ').trim();
+                    
+                    var searchIn = caseSensitive ? searchableText : searchableText.toLowerCase();
+                    
+                    var foundMatch = false;
+                    if (wholeWord && searchPattern) {
+                        foundMatch = searchPattern.test(searchIn);
+                    } else {
+                        foundMatch = searchIn.indexOf(searchQuery) !== -1;
+                    }
+                    
+                    if (foundMatch) {
+                        if ((caseSensitive ? extItem.Name.indexOf(searchQuery) !== -1 : extItem.Name.toLowerCase().indexOf(searchQuery) !== -1)) {
+                            matchedFields.push({
+                                field: 'Extension Name',
+                                value: extItem.Name,
+                                preview: getMatchPreview(extItem.Name, searchTerm, caseSensitive)
+                            });
+                        }
+                        if ((caseSensitive ? extItem.Browser.indexOf(searchQuery) !== -1 : extItem.Browser.toLowerCase().indexOf(searchQuery) !== -1)) {
+                            matchedFields.push({
+                                field: 'Browser',
+                                value: extItem.Browser,
+                                preview: getMatchPreview(extItem.Browser, searchTerm, caseSensitive)
+                            });
+                        }
+                        if ((caseSensitive ? extItem.ID.indexOf(searchQuery) !== -1 : extItem.ID.toLowerCase().indexOf(searchQuery) !== -1)) {
+                            matchedFields.push({
+                                field: 'Extension ID',
+                                value: extItem.ID,
+                                preview: getMatchPreview(extItem.ID, searchTerm, caseSensitive)
+                            });
+                        }
+                        
+                        if (matchedFields.length > 0) {
+                            allResults.push({
+                                dataType: 'browser',
+                                rowIndex: extItem.RowIndex,
+                                item: {
+                                    TableRef: 'extensions-table',
+                                    Name: extItem.Name,
+                                    Browser: extItem.Browser,
+                                    User: extItem.User
+                                },
+                                matches: matchedFields
+                            });
+                        }
+                    }
+                }
+            }            
             
             // Search each dataset
             for (var i = 0; i < datasetsToSearch.length; i++) {
@@ -6107,6 +6381,35 @@ $(
         }
         
         function jumpToResult(dataType, rowIndex, tableRef) {
+            if (tableRef === 'extensions-table') {
+                showTab('browser');
+                highlightTabButton('browser');
+                
+                setTimeout(function() {
+                    var table = document.getElementById('extensions-table');
+                    if (!table) return;
+                    
+                    var tbody = table.getElementsByTagName('tbody')[0];
+                    if (!tbody) return;
+                    
+                    var rows = tbody.getElementsByTagName('tr');
+                    
+                    if (rows[rowIndex]) {
+                        var targetRow = rows[rowIndex];
+                        targetRow.style.background = 'var(--accent-yellow)';
+                        targetRow.style.transition = 'background 2s';
+                        targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        
+                        setTimeout(function() {
+                            targetRow.style.background = '';
+                        }, 3000);
+                    } else {
+                        table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }, 500);
+                return;
+            }
+            
             // Handle system info specially - go to sysinfo tab and try to scroll to table
             if (dataType === 'systeminfo') {
                 showTab('sysinfo');
@@ -6145,7 +6448,8 @@ $(
             // FIXED: Determine correct tab based on data category
             var targetTab = dataType;
             
-            // Map browser extensions to browser tab
+            // CRITICAL: Check browser extensions FIRST before other checks
+            // Browser extensions must map to browser tab, not sysinfo
             if (tableRef === 'extensions-table') {
                 targetTab = 'browser';
             }
@@ -6400,6 +6704,14 @@ $(
                 }
             });
         })();
+        
+        // Simple loading message
+        (function() {
+            var loadProgress = document.getElementById('load-progress');
+            if (loadProgress) {
+                loadProgress.textContent = 'Initializing modules...';
+            }
+        })();
     </script>
 <div class="footer">
         <div>
@@ -6440,6 +6752,11 @@ $(
     if (-not $Auto -and -not $Aggressive) {
         $Auto = $true
     }
+    # Validate Config parameter
+    if ($Config -contains 'All' -and $Config.Count -gt 1) {
+        Write-Warning "Config contains 'All' with other specific modules. 'All' takes precedence."
+        $Config = @('All')
+    }
     
     # Check for administrator privileges
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
@@ -6458,16 +6775,20 @@ $(
             
             # Resolve to absolute path if relative
             if (-not [System.IO.Path]::IsPathRooted($LoadFromJson)) {
-                $LoadFromJson = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LoadFromJson)
+                $currentPath = Get-Location
+                $LoadFromJson = Join-Path $currentPath.Path $LoadFromJson
             }
             
             # Normalize path
             $LoadFromJson = [System.IO.Path]::GetFullPath($LoadFromJson)
             
-            Write-Host "[+] Loading data from: $LoadFromJson" -ForegroundColor Yellow
+            Write-Host "[+] Resolved path: $LoadFromJson" -ForegroundColor Green
         }
         catch {
             Write-Error "Could not resolve LoadFromJson path: $($_.Exception.Message)"
+            Write-Host "[!] Provided path: $LoadFromJson" -ForegroundColor Yellow
+            Write-Host "[!] Current directory: $(Get-Location)" -ForegroundColor Yellow
+            Write-Host "[!] Ensure the path exists and is accessible" -ForegroundColor Yellow
             return
         }
     
@@ -6475,6 +6796,16 @@ $(
         if (-not (Test-Path $LoadFromJson)) {
             Write-Error "LoadFromJson path does not exist: $LoadFromJson"
             Write-Host "[!] Tried to access: $LoadFromJson" -ForegroundColor Yellow
+            Write-Host "[!] Current directory: $(Get-Location)" -ForegroundColor Yellow
+            
+            # Try to list parent directory to help user
+            $parentPath = Split-Path -Parent $LoadFromJson
+            if ($parentPath -and (Test-Path $parentPath)) {
+                Write-Host "[!] Contents of parent directory ($parentPath):" -ForegroundColor Yellow
+                Get-ChildItem -Path $parentPath -Directory | Select-Object -First 10 | ForEach-Object {
+                    Write-Host "    - $($_.Name)" -ForegroundColor DarkGray
+                }
+            }
             return
         }
     
@@ -6494,16 +6825,24 @@ $(
                 }
                 else {
                     Write-Error "JSON_Files subfolder not found in: $LoadFromJson"
-                    Write-Host "[!] Expected either:" -ForegroundColor Yellow
-                    Write-Host "    - $LoadFromJson\JSON_Files\" -ForegroundColor Yellow
-                    Write-Host "    - OR JSON files directly in: $LoadFromJson" -ForegroundColor Yellow
+                    Write-Host "[!] Expected structure:" -ForegroundColor Yellow
+                    Write-Host "    Option 1: $LoadFromJson\JSON_Files\persistence.json" -ForegroundColor Yellow
+                    Write-Host "    Option 2: $LoadFromJson\persistence.json" -ForegroundColor Yellow
+                    Write-Host "[!] Contents of $LoadFromJson :" -ForegroundColor Yellow
+                    Get-ChildItem -Path $LoadFromJson | Select-Object -First 10 | ForEach-Object {
+                        Write-Host "    - $($_.Name)" -ForegroundColor DarkGray
+                    }
                     return
                 }
+            }
+            else {
+                Write-Host "[+] Found JSON_Files subfolder" -ForegroundColor Green
             }
         }
         else {
             Write-Error "LoadFromJson must point to a directory (either main output folder or JSON_Files folder)"
             Write-Host "[!] Provided path appears to be a file, not a directory" -ForegroundColor Yellow
+            Write-Host "[!] Path: $LoadFromJson" -ForegroundColor Yellow
             return
         }
     
@@ -6531,6 +6870,7 @@ $(
                 'tasks.json'       = 'Tasks'
                 'files.json'       = 'Files'
                 'registry.json'    = 'Registry'
+                'systeminfo.json'  = 'SystemInfo'
             }
         
             foreach ($file in $jsonFiles.Keys) {
@@ -6539,17 +6879,32 @@ $(
                     $dataType = $jsonFiles[$file]
                     Write-Host "  [-] Loading $file..." -ForegroundColor DarkGray
                 
-                    $jsonContent = Get-Content -Path $filePath -Raw -ErrorAction Stop
-                    $loadedData = $jsonContent | ConvertFrom-Json -ErrorAction Stop
-                
-                    if ($dataType -eq 'Files') {
-                        $forensicData.Files.All = $loadedData
+                    try {
+                        $jsonContent = Get-Content -Path $filePath -Raw -ErrorAction Stop
+                        $loadedData = $jsonContent | ConvertFrom-Json -ErrorAction Stop
+                    
+                        if ($dataType -eq 'Files') {
+                            $forensicData.Files.All = $loadedData
+                        }
+                        else {
+                            $forensicData[$dataType] = $loadedData
+                        }
+                    
+                        # Display appropriate count
+                        $recordCount = 0
+                        if ($loadedData -is [array]) {
+                            $recordCount = $loadedData.Count
+                        }
+                        elseif ($null -ne $loadedData) {
+                            $recordCount = 1
+                        }
+                        
+                        Write-Host "  [+] Loaded $recordCount records from $file" -ForegroundColor Green
                     }
-                    else {
-                        $forensicData[$dataType] = $loadedData
+                    catch {
+                        Write-Warning "Error loading $file : $($_.Exception.Message)"
+                        Write-Host "  [!] Continuing without $dataType data" -ForegroundColor Yellow
                     }
-                
-                    Write-Host "  [+] Loaded $($loadedData.Count) records from $file" -ForegroundColor Green
                 }
                 else {
                     Write-Host "  [!] $file not found - skipping" -ForegroundColor Yellow
@@ -6619,7 +6974,7 @@ $(
                 -MaxChars $MaxChars -MaxRows $MaxRows -AllFields:$AllFields
         
             Write-Host ""
-            Write-Host "[!] HTML REPORT GENERATED FROM JSON DATA" -ForegroundColor Green -BackgroundColor DarkGray
+            Write-Host "[!] HTML REPORT GENERATED FROM JSON DATA" -ForegroundColor Red -BackgroundColor Black
             Write-Host "[+] Output Directory: $OutputDir" -ForegroundColor Green
             Write-Host "[+] Forensic Report: $htmlPath" -ForegroundColor Green
             Write-Host ""
@@ -6644,6 +6999,12 @@ $(
         $OutputDir = "C:\ForensicDump_$($env:COMPUTERNAME)_$timestamp"
     }
     else {
+        # Validate OutputDir is not just whitespace or invalid characters
+        if ([string]::IsNullOrWhiteSpace($OutputDir.Trim())) {
+            Write-Error "OutputDir parameter cannot be empty or whitespace"
+            return
+        }
+        
         # Expand relative paths and environment variables to absolute path
         try {
             # First resolve environment variables
@@ -6727,14 +7088,37 @@ $(
     
     # Validate LoadToolPath usage
     if (![string]::IsNullOrWhiteSpace($LoadToolPath) -and -not $LoadBrowserTool) {
-        Write-Warning "LoadToolPath specified but LoadBrowserTool switch not set. LoadToolPath will be ignored."
-        Write-Warning "Use -LoadBrowserTool to enable LoadTool mode."
+        Write-Error "LoadToolPath specified but LoadBrowserTool switch not set. Use -LoadBrowserTool to enable LoadTool mode."
+        return
     }
     
-    # Validate LoadToolPath exists if provided
+    # Validate and expand LoadToolPath if provided
     if ($LoadBrowserTool -and ![string]::IsNullOrWhiteSpace($LoadToolPath)) {
-        if (-not (Test-Path $LoadToolPath)) {
-            Write-Error "LoadToolPath specified but file not found: $LoadToolPath"
+        try {
+            # Expand environment variables
+            $LoadToolPath = [System.Environment]::ExpandEnvironmentVariables($LoadToolPath)
+            
+            # Resolve to absolute path if relative
+            if (-not [System.IO.Path]::IsPathRooted($LoadToolPath)) {
+                $currentPath = Get-Location
+                $LoadToolPath = Join-Path $currentPath.Path $LoadToolPath
+            }
+            
+            # Normalize path
+            $LoadToolPath = [System.IO.Path]::GetFullPath($LoadToolPath)
+            
+            # Validate file exists
+            if (-not (Test-Path $LoadToolPath)) {
+                Write-Error "LoadToolPath specified but file not found: $LoadToolPath"
+                Write-Host "[!] Resolved path: $LoadToolPath" -ForegroundColor Yellow
+                Write-Host "[!] Current directory: $(Get-Location)" -ForegroundColor Yellow
+                return
+            }
+            
+            Write-Host "[+] LoadToolPath resolved to: $LoadToolPath" -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Failed to resolve LoadToolPath: $($_.Exception.Message)"
             return
         }
     }
@@ -6789,6 +7173,8 @@ $(
         Update-ProgressWithEstimate -Activity "Forensic Dump" -StepTimes ([ref]$progressTimes) -Status "Analyzing persistence mechanisms..." -PercentComplete 15
         Write-Host "[+] Analyzing persistence mechanisms..." -ForegroundColor Yellow
         try {
+            # Note: Flags are preserved as-is from Hunt-Persistence output
+            # No default flags are added - only original flags are displayed
             $persistenceParams = @{
                 All       = $true
                 PassThru  = $true
@@ -6798,54 +7184,28 @@ $(
             
             $persistenceResults = Hunt-Persistence @persistenceParams
             
-            # Verify and normalize Flag field - ensure consistency
+            # Use Flag field as-is from Hunt-Persistence output
+            # No normalization or default values - preserve original flags only
             if ($persistenceResults -and $persistenceResults.Count -gt 0) {
-                $flagCount = 0
-                $flagAdded = 0
+                $flaggedCount = 0
+                $noFlagCount = 0
                 
                 foreach ($item in $persistenceResults) {
-                    # Check if Flag property exists
                     $flagProp = $item.PSObject.Properties['Flag']
                     
-                    if ($null -eq $flagProp) {
-                        # No Flag property at all - add default based on other properties
-                        $defaultFlag = 'Info'
-                        if ($item.PSObject.Properties['Severity'] -and ![string]::IsNullOrWhiteSpace($item.Severity)) {
-                            $defaultFlag = $item.Severity
-                        }
-                        elseif ($item.PSObject.Properties['Risk'] -and ![string]::IsNullOrWhiteSpace($item.Risk)) {
-                            $defaultFlag = $item.Risk
-                        }
-                        elseif ($item.PSObject.Properties['Category'] -and $item.Category -match 'suspicious|malicious|critical') {
-                            $defaultFlag = 'High'
-                        }
-                        
-                        $item | Add-Member -NotePropertyName 'Flag' -NotePropertyValue $defaultFlag -Force
-                        $flagAdded++
-                    }
-                    elseif ([string]::IsNullOrWhiteSpace($flagProp.Value)) {
-                        # Flag exists but is empty - populate it
-                        $defaultFlag = 'Info'
-                        if ($item.PSObject.Properties['Severity'] -and ![string]::IsNullOrWhiteSpace($item.Severity)) {
-                            $defaultFlag = $item.Severity
-                        }
-                        elseif ($item.PSObject.Properties['Risk'] -and ![string]::IsNullOrWhiteSpace($item.Risk)) {
-                            $defaultFlag = $item.Risk
-                        }
-                        
-                        $item.Flag = $defaultFlag
-                        $flagAdded++
+                    if ($null -ne $flagProp -and ![string]::IsNullOrWhiteSpace($flagProp.Value)) {
+                        $flaggedCount++
                     }
                     else {
-                        $flagCount++
+                        $noFlagCount++
                     }
                 }
                 
-                if ($flagAdded -gt 0) {
-                    Write-Host "  [!] Added/normalized Flag field for $flagAdded persistence items" -ForegroundColor Yellow
+                if ($flaggedCount -gt 0) {
+                    Write-Host "  [-] $flaggedCount persistence items have flags from Hunt-Persistence" -ForegroundColor DarkGray
                 }
-                if ($flagCount -gt 0) {
-                    Write-Host "  [-] Verified Flag field in $flagCount persistence items" -ForegroundColor DarkGray
+                if ($noFlagCount -gt 0) {
+                    Write-Host "  [-] $noFlagCount persistence items have no flags (will display empty)" -ForegroundColor DarkGray
                 }
             }
             
@@ -6982,7 +7342,8 @@ $(
                 $browserParams['Auto'] = $true
             }
             
-            $browserResults = Hunt-Browser @browserParams
+            $browserResults = Hunt-Browser @browserParams -Verbose:$false 6>$null
+
             
             # Clear progress bars with error handling
             $progressActivities = @(
@@ -7019,45 +7380,28 @@ $(
             }
             Start-Sleep -Milliseconds 50
             
-            # DEBUG: Check object types before assignment
-            if ($null -ne $browserResults) {
-                
-                if ($browserResults.Count -gt 0) {
-                    $sampleItem = $browserResults[0]
-                    
-                    # Check if properties are accessible
-                    $propCount = ($sampleItem.PSObject.Properties | Measure-Object).Count
-                    
-                    # Test property access
-                    $testProp = $sampleItem.PSObject.Properties | Select-Object -First 1
-                    if ($testProp) {
-                        $testValue = $testProp.Value
-                        if ($testValue -is [System.Collections.IEnumerable] -and $testValue -isnot [string]) {
-                            Write-Host "  [!!! CORRUPTION DETECTED !!!] Property value is enumerable but not string!" -ForegroundColor Red
-                        }
-                    }
-                }
-            }
-            
-            # Assign results - avoid array wrapping that causes corruption
+            # Assign results with proper type handling
             if ($null -eq $browserResults) {
                 $forensicData.Browser = @()
                 Write-Host "  [!] No browser data returned" -ForegroundColor Yellow
             }
-            elseif ($browserResults -is [System.Collections.Generic.List[PSObject]]) {
-                # It's already a List, keep it as-is
-                $forensicData.Browser = $browserResults
-                Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
-            }
-            elseif ($browserResults -is [array]) {
-                # It's an array, keep it as-is without re-wrapping
-                $forensicData.Browser = $browserResults
-                Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
-            }
             else {
-                # Single object - wrap carefully
-                $forensicData.Browser = @($browserResults)
-                Write-Host "  [+] Collected 1 browser entry" -ForegroundColor Green
+                try {
+                    # Normalize to array regardless of input type
+                    if ($browserResults -is [array] -or $browserResults -is [System.Collections.Generic.List[PSObject]]) {
+                        $forensicData.Browser = $browserResults
+                        Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
+                    }
+                    else {
+                        # Single object - wrap in array
+                        $forensicData.Browser = @($browserResults)
+                        Write-Host "  [+] Collected 1 browser entry" -ForegroundColor Green
+                    }
+                }
+                catch {
+                    Write-Warning "Error processing browser results: $($_.Exception.Message)"
+                    $forensicData.Browser = @()
+                }
             }
         }
         catch {
@@ -7178,18 +7522,6 @@ $(
             }
             
             $forensicData.Logs = Hunt-Logs @logParams
-            
-            # VALIDATION: Check for corruption
-            if ($null -ne $forensicData.Logs -and $forensicData.Logs.Count -gt 0) {
-                $sampleLog = $forensicData.Logs[0]
-                foreach ($prop in $sampleLog.PSObject.Properties) {
-                    $val = $prop.Value
-                    if ($val -and $val.GetType().Name -match 'Enumerator|Iterator') {
-                        Write-Host "  [!!!] CORRUPTION DETECTED in log field: $($prop.Name)" -ForegroundColor Red
-                        Write-Host "  [!] Value type: $($val.GetType().FullName)" -ForegroundColor Yellow
-                    }
-                }
-            }
 
             if ($null -eq $forensicData.Logs) {
                 $forensicData.Logs = @()
@@ -7309,6 +7641,8 @@ $(
     }
     catch {
         Write-Warning "JSON export failed: $($_.Exception.Message)"
+        Write-Host "  [!] HTML report may have limited functionality without JSON data" -ForegroundColor Yellow
+        # Continue execution - CSV files are still available
     }
     
     # Generate HTML Report
@@ -9347,7 +9681,7 @@ https://attack.mitre.org/tactics/TA0003/
                                 # Force another GC and wait longer
                                 [System.GC]::Collect()
                                 [System.GC]::WaitForPendingFinalizers()
-                                Start-Sleep -Milliseconds 1000
+                                Start-Sleep -Milliseconds 750
                             }
                             else {
                                 Write-Warning "Failed to dismount $mountPoint after $maxRetries attempts (exit code: $LASTEXITCODE)"
@@ -11799,11 +12133,12 @@ Start date for log search. Accepts multiple formats:
 - DateTime objects: [datetime]"2025-01-01 10:00:00"
 - Relative time strings: '7D' (days), '24H' (hours), '30M' (minutes)
 - Keyword: 'Now' for current time
-Default: 7 days ago (with warning message)
+Default: If not specified, retrieves ALL available logs (no time filter)
 
 .PARAMETER EndDate
 End date for log search. Uses same formats as StartDate.
-Default: Current time ('Now')
+Default: If StartDate specified without EndDate, defaults to 'Now' (current time)
+Note: Cannot specify EndDate without StartDate
 
 .PARAMETER Search
 Array of strings to search for in event messages and XML data. Case-insensitive wildcard matching.
@@ -11964,13 +12299,13 @@ Special Characters: Search uses PowerShell -like operator. Wildcards: * (any cha
                     To search literal *, ?, [, ] characters, escape with backtick: `*
 Time Ranges: Invalid date inputs will throw descriptive errors. Relative times calculated from current time.
 Search Priority: -Search takes precedence over -Exclude. -ExcludeEventId takes precedence over everything.
-Default Behavior: Without date parameters, defaults to 7-day search with warning message.
+Default Behavior: Without date parameters, retrieves ALL available logs with no time filtering.
 #>
     param (
         [Parameter(Mandatory = $false)]
         $StartDate,
         [Parameter(Mandatory = $false)]
-        $EndDate = "Now",
+        $EndDate,
         [Parameter(Mandatory = $false)]
         [string[]]$Search = @(),
         [Parameter(Mandatory = $false)]
@@ -12177,8 +12512,8 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
     function Test-CacheValidity {
         [CmdletBinding()]
         param(
-            [DateTime]$RequestedStartDate,
-            [DateTime]$RequestedEndDate,
+            $RequestedStartDate,
+            $RequestedEndDate,
             [string[]]$RequestedLogNames,
             [int[]]$RequestedEventId,
             [string]$RequestedFolderPath,
@@ -12217,39 +12552,66 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
                 return @{ Valid = $false; Reason = "Timezone changed"; RequiresFullRefresh = $true }
             }
             
-            # Validate cached dates exist
-            if ($null -eq $global:HuntLogsCache.Parameters.StartDate -or 
-                $null -eq $global:HuntLogsCache.Parameters.EndDate) {
-                Write-Verbose "Cache has null dates"
-                return @{ Valid = $false; Reason = "Invalid cache dates"; RequiresFullRefresh = $true }
+            # Handle null date scenarios (requesting ALL logs)
+            if ($null -eq $RequestedStartDate -and $null -eq $RequestedEndDate) {
+                # Requesting ALL logs - cache is only valid if it also cached ALL logs
+                if ($null -eq $global:HuntLogsCache.Parameters.StartDate -and 
+                    $null -eq $global:HuntLogsCache.Parameters.EndDate) {
+                    Write-Verbose "Cache contains ALL logs, matches request for ALL logs"
+                    # Continue to other validation checks
+                }
+                else {
+                    Write-Verbose "Requesting ALL logs but cache has date filters"
+                    return @{ Valid = $false; Reason = "Cache has date filters, requesting ALL"; RequiresFullRefresh = $true }
+                }
             }
-            
-            $cachedStart = $global:HuntLogsCache.Parameters.StartDate
-            $cachedEnd = $global:HuntLogsCache.Parameters.EndDate
-            
-            # Check time range compatibility
-            # Requested range must be within or equal to cached range for full cache use
-            # If requested range extends beyond cached, we need partial refresh
-            
-            $needsEarlierData = $RequestedStartDate -lt $cachedStart
-            $needsLaterData = $RequestedEndDate -gt $cachedEnd
-            
-            if ($needsEarlierData -or $needsLaterData) {
-                # Requested range extends beyond cached range
-                Write-Verbose "Requested range extends beyond cache: Earlier=$needsEarlierData, Later=$needsLaterData"
+            elseif ($null -eq $global:HuntLogsCache.Parameters.StartDate -and 
+                $null -eq $global:HuntLogsCache.Parameters.EndDate) {
+                # Cache has ALL logs but request has date filters - cache can still be used
+                Write-Verbose "Cache has ALL logs, can filter for requested date range"
+                # Continue to validation - cache covers the requested range
+            }
+            else {
+                # Both have dates - validate compatibility
+                if ($null -eq $global:HuntLogsCache.Parameters.StartDate -or 
+                    $null -eq $global:HuntLogsCache.Parameters.EndDate) {
+                    Write-Verbose "Cache has partial null dates (invalid state)"
+                    return @{ Valid = $false; Reason = "Invalid cache dates"; RequiresFullRefresh = $true }
+                }
                 
-                return @{
-                    Valid                  = $true
-                    UseCache               = $true
-                    RequiresPartialRefresh = $true
-                    NeedsEarlierData       = $needsEarlierData
-                    NeedsLaterData         = $needsLaterData
-                    CachedStart            = $cachedStart
-                    CachedEnd              = $cachedEnd
-                    Reason                 = "Partial cache hit - needs supplemental data"
+                if ($null -eq $RequestedStartDate -or $null -eq $RequestedEndDate) {
+                    Write-Verbose "Request has partial null dates (invalid state)"
+                    return @{ Valid = $false; Reason = "Invalid request dates"; RequiresFullRefresh = $true }
+                }
+                
+                $cachedStart = $global:HuntLogsCache.Parameters.StartDate
+                $cachedEnd = $global:HuntLogsCache.Parameters.EndDate
+                
+                # Check time range compatibility
+                # Requested range must be within or equal to cached range for full cache use
+                # If requested range extends beyond cached, we need partial refresh
+                
+                $needsEarlierData = $RequestedStartDate -lt $cachedStart
+                $needsLaterData = $RequestedEndDate -gt $cachedEnd
+            
+                if ($needsEarlierData -or $needsLaterData) {
+                    # Requested range extends beyond cached range
+                    Write-Verbose "Requested range extends beyond cache: Earlier=$needsEarlierData, Later=$needsLaterData"
+                    
+                    return @{
+                        Valid                  = $true
+                        UseCache               = $true
+                        RequiresPartialRefresh = $true
+                        NeedsEarlierData       = $needsEarlierData
+                        NeedsLaterData         = $needsLaterData
+                        CachedStart            = $cachedStart
+                        CachedEnd              = $cachedEnd
+                        Reason                 = "Partial cache hit - needs supplemental data"
+                    }
                 }
             }
             
+           
             # Check if requested logs are subset of cached logs
             # Empty cached log list means "all logs" were cached
             if ($global:HuntLogsCache.Parameters.LogNames.Count -gt 0) {
@@ -12306,8 +12668,8 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
     function Get-FilteredCachedEvents {
         [CmdletBinding()]
         param(
-            [DateTime]$StartDate,
-            [DateTime]$EndDate,
+            $StartDate,
+            $EndDate,
             [string[]]$LogNames,
             [int[]]$EventId
         )
@@ -12318,8 +12680,11 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
             foreach ($key in $global:HuntLogsCache.RawEvents.Keys) {
                 $event = $global:HuntLogsCache.RawEvents[$key]
                 
-                # Filter by time range
-                if ($event.TimeCreated -lt $StartDate -or $event.TimeCreated -gt $EndDate) {
+                # Filter by time range (only if dates provided)
+                if ($null -ne $StartDate -and $event.TimeCreated -lt $StartDate) {
+                    continue
+                }
+                if ($null -ne $EndDate -and $event.TimeCreated -gt $EndDate) {
                     continue
                 }
                 
@@ -12386,8 +12751,8 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
     function Update-CacheParameters {
         [CmdletBinding()]
         param(
-            [DateTime]$StartDate,
-            [DateTime]$EndDate,
+            $StartDate,
+            $EndDate,
             [string[]]$LogNames,
             [int[]]$EventId,
             [string]$FolderPath,
@@ -12395,16 +12760,25 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
         )
         
         try {
-            # Update time range (expand if necessary)
-            if ($null -eq $global:HuntLogsCache.Parameters.StartDate -or 
-                $StartDate -lt $global:HuntLogsCache.Parameters.StartDate) {
-                $global:HuntLogsCache.Parameters.StartDate = $StartDate
+            # Handle null dates (ALL logs scenario)
+            if ($null -eq $StartDate -and $null -eq $EndDate) {
+                # Caching ALL logs - set cache parameters to null
+                $global:HuntLogsCache.Parameters.StartDate = $null
+                $global:HuntLogsCache.Parameters.EndDate = $null
             }
-            
-            if ($null -eq $global:HuntLogsCache.Parameters.EndDate -or 
-                $EndDate -gt $global:HuntLogsCache.Parameters.EndDate) {
-                $global:HuntLogsCache.Parameters.EndDate = $EndDate
+            elseif ($null -ne $StartDate -and $null -ne $EndDate) {
+                # Update time range (expand if necessary)
+                if ($null -eq $global:HuntLogsCache.Parameters.StartDate -or 
+                    $StartDate -lt $global:HuntLogsCache.Parameters.StartDate) {
+                    $global:HuntLogsCache.Parameters.StartDate = $StartDate
+                }
+                
+                if ($null -eq $global:HuntLogsCache.Parameters.EndDate -or 
+                    $EndDate -gt $global:HuntLogsCache.Parameters.EndDate) {
+                    $global:HuntLogsCache.Parameters.EndDate = $EndDate
+                }
             }
+            # If parameters are mixed null/non-null, keep existing cache dates
             
             # Update log names (expand if necessary)
             if ($LogNames.Count -eq 0) {
@@ -12618,8 +12992,8 @@ Default Behavior: Without date parameters, defaults to 7-day search with warning
         
         # Build final parameters by combining baseline with user additions
         $finalParams = @{
-            StartDate = if ($PSBoundParameters.ContainsKey('StartDate')) { $StartDate } else { $baselineParams.StartDate }
-            EndDate   = if ($PSBoundParameters.ContainsKey('EndDate')) { $EndDate } else { $baselineParams.EndDate }
+            StartDate = if ($PSBoundParameters.ContainsKey('StartDate') -and $null -ne $StartDate) { $StartDate } else { $baselineParams.StartDate }
+            EndDate   = if ($PSBoundParameters.ContainsKey('EndDate') -and $null -ne $EndDate) { $EndDate } else { $baselineParams.EndDate }
             Search    = @($script:GlobalLogIOCs) + $Search  # Combine baseline IOCs with user additions
             SortOrder = $SortOrder
             XML       = $XML
@@ -13247,18 +13621,27 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         return $convertedTime.ToString("yyyy-MM-dd HH:mm:ss") + " $tzAbbrev"
     }
 
-    # For search mode, make dates optional with sensible defaults
-    if ($null -eq $StartDate -and $null -eq $EndDate) {
-        $StartDate = (Get-Date).AddDays(-7)  # Default to last 7 days
-        $EndDate = Get-Date
-        Write-Host "WARNING: No date range specified. Using default: Last 7 days" -ForegroundColor Yellow
+    # Handle default date logic - if no StartDate specified, get ALL logs
+    if (-not $PSBoundParameters.ContainsKey('StartDate') -and -not $PSBoundParameters.ContainsKey('EndDate')) {
+        # No dates specified - retrieve ALL logs (no date filtering)
+        $StartDate = $null
+        $EndDate = $null
+        # Message will be displayed later in the date parsing section
     }
-    elseif ($null -eq $StartDate) {
-        throw "EndDate specified but StartDate is missing. Please provide both dates or neither."
+    elseif ($PSBoundParameters.ContainsKey('StartDate') -and -not $PSBoundParameters.ContainsKey('EndDate')) {
+        # StartDate provided but no EndDate - default EndDate to Now
+        if ($null -eq $EndDate) {
+            $EndDate = "Now"
+        }
+        if (-not $Quiet) {
+            Write-Verbose "EndDate not specified, defaulting to current time"
+        }
     }
-    elseif ($null -eq $EndDate) {
-        throw "StartDate specified but EndDate is missing. Please provide both dates or neither."
+    elseif (-not $PSBoundParameters.ContainsKey('StartDate') -and $PSBoundParameters.ContainsKey('EndDate')) {
+        # EndDate provided but no StartDate - this is an error
+        throw "EndDate specified but StartDate is missing. Please provide both dates or neither for all logs."
     }
+    # If both are provided, they'll be validated below
 
     # Handle parameter logic for XML and MSG truncation
     $xmlTruncateLength = $XML
@@ -13650,42 +14033,69 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     }
 
     # Convert input dates with defensive error handling
-    try {
-        $parsedStartDate = ConvertTo-DateTime -InputValue $StartDate -TargetTimeZone $targetTimeZone
-        $parsedEndDate = ConvertTo-DateTime -InputValue $EndDate -TargetTimeZone $targetTimeZone
-        
-        # Validation: Ensure StartDate is before EndDate
-        if ($parsedStartDate -gt $parsedEndDate) {
-            throw "StartDate ($StartDate) cannot be after EndDate ($EndDate). Please check your date range."
+    $parsedStartDate = $null
+    $parsedEndDate = $null
+    
+    if ($null -ne $StartDate -or $null -ne $EndDate) {
+        try {
+            # Parse dates if provided
+            if ($null -ne $StartDate) {
+                $parsedStartDate = ConvertTo-DateTime -InputValue $StartDate -TargetTimeZone $targetTimeZone
+            }
+            if ($null -ne $EndDate) {
+                $parsedEndDate = ConvertTo-DateTime -InputValue $EndDate -TargetTimeZone $targetTimeZone
+            }
+            
+            # Validation: Ensure StartDate is before EndDate (if both provided)
+            if ($null -ne $parsedStartDate -and $null -ne $parsedEndDate) {
+                if ($parsedStartDate -gt $parsedEndDate) {
+                    throw "StartDate ($StartDate) cannot be after EndDate ($EndDate). Please check your date range."
+                }
+                
+                # Validation: Warn if date range is excessively large 
+                $daysDifference = ($parsedEndDate - $parsedStartDate).TotalDays
+                if ($daysDifference -gt 30) {
+                    Write-Warning "Large date range detected: $([math]::Round($daysDifference, 0)) days. This may take significant time to process."
+                }
+            }
+            
+            # Validation: Warn if searching future dates
+            if ($null -ne $parsedStartDate) {
+                $now = Get-Date
+                if ($parsedStartDate -gt $now) {
+                    Write-Warning "StartDate is in the future. No logs will be found."
+                }
+            }
+            
+            if (-not $Quiet) {
+                if ($null -ne $parsedStartDate -and $null -ne $parsedEndDate) {
+                    $formattedStart = Format-DateTimeWithTimeZone -DateTime $parsedStartDate -TargetTimeZone $targetTimeZone
+                    $formattedEnd = Format-DateTimeWithTimeZone -DateTime $parsedEndDate -TargetTimeZone $targetTimeZone
+                    Write-Host "[INFO] Search Range: $formattedStart to $formattedEnd" -ForegroundColor Cyan
+                }
+                elseif ($null -ne $parsedStartDate) {
+                    $formattedStart = Format-DateTimeWithTimeZone -DateTime $parsedStartDate -TargetTimeZone $targetTimeZone
+                    Write-Host "[INFO] Search Range: From $formattedStart to present" -ForegroundColor Cyan
+                }
+            }
         }
-        
-        # Validation: Warn if date range is excessively large 
-        $daysDifference = ($parsedEndDate - $parsedStartDate).TotalDays
-        if ($daysDifference -gt 30) {
-            Write-Warning "Large date range detected: $([math]::Round($daysDifference, 0)) days. This may take significant time to process."
-        }
-        
-        # Validation: Warn if searching future dates
-        $now = Get-Date
-        if ($parsedStartDate -gt $now) {
-            Write-Warning "StartDate is in the future. No logs will be found."
-        }
-        
-        if (-not $Quiet) {
-            $formattedStart = Format-DateTimeWithTimeZone -DateTime $parsedStartDate -TargetTimeZone $targetTimeZone
-            $formattedEnd = Format-DateTimeWithTimeZone -DateTime $parsedEndDate -TargetTimeZone $targetTimeZone
-            Write-Host "[INFO] Search Range: $formattedStart to $formattedEnd" -ForegroundColor Cyan
+        catch {
+            Write-Error "Date parsing error: $($_.Exception.Message)"
+            Write-Host ""
+            Write-Host "Valid date formats:" -ForegroundColor Yellow
+            Write-Host "  - Relative: '7D' (days), '24H' (hours), '30M' (minutes)" -ForegroundColor Gray
+            Write-Host "  - Absolute: '2025-01-01', '2025-01-01 14:30:00'" -ForegroundColor Gray
+            Write-Host "  - Keyword: 'Now' for current time" -ForegroundColor Gray
+            Write-Host "  - No dates: Retrieves ALL available logs" -ForegroundColor Gray
+            Write-Host ""
+            throw
         }
     }
-    catch {
-        Write-Error "Date parsing error: $($_.Exception.Message)"
-        Write-Host ""
-        Write-Host "Valid date formats:" -ForegroundColor Yellow
-        Write-Host "  - Relative: '7D' (days), '24H' (hours), '30M' (minutes)" -ForegroundColor Gray
-        Write-Host "  - Absolute: '2025-01-01', '2025-01-01 14:30:00'" -ForegroundColor Gray
-        Write-Host "  - Keyword: 'Now', '7D' " -ForegroundColor Gray
-        Write-Host ""
-        throw
+    else {
+        # No date filtering - will retrieve ALL logs
+        if (-not $Quiet) {
+            Write-Host "[INFO] No date range specified. Retrieving ALL available logs (no time filter)" -ForegroundColor Cyan
+        }
     }
 
     # ============================================================================
@@ -13904,11 +14314,13 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
 
                 try {
                     $filterHash = @{
-                        Path      = $evtxFile.FullName
-                        StartTime = $queryStartDate
-                        EndTime   = $queryEndDate
+                        Path = $evtxFile.FullName
                     }
-
+                    
+                    # Only add time filters if dates are provided
+                    if ($null -ne $queryStartDate) { $filterHash.StartTime = $queryStartDate }
+                    if ($null -ne $queryEndDate) { $filterHash.EndTime = $queryEndDate }
+                    
                     if ($EventId.Count -gt 0) { $filterHash.Id = $EventId }
 
                     # PERFORMANCE: Limit events retrieved per file
@@ -13986,23 +14398,65 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             $currentQueryIndex = 0
 
             try {
-                $availableLogs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
-                Where-Object { $_.RecordCount -gt 0 -and $_.RecordCount -lt 1000000 -and $_.LastWriteTime -ge $parsedStartDate.AddDays(-30) }
+                # Get all available logs with records
+                if ($null -ne $parsedStartDate) {
+                    # Filter by LastWriteTime if we have a start date
+                    $availableLogs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
+                    Where-Object { $_.RecordCount -gt 0 -and $_.RecordCount -lt 1000000 -and $_.LastWriteTime -ge $parsedStartDate.AddDays(-30) }
+                }
+                else {
+                    # No start date - get all logs (no time filter on LastWriteTime)
+                    $availableLogs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
+                    Where-Object { $_.RecordCount -gt 0 -and $_.RecordCount -lt 1000000 }
+                }
 
                 if ($LogNames.Count -gt 0) {
-                    $availableLogsLower = @{}
-                    foreach ($logItem in $availableLogs) { 
-                        $availableLogsLower[$logItem.LogName.ToLower()] = $logItem.LogName 
-                    }
-                
+                    # Wildcard matching support for LogNames
                     foreach ($logName in $LogNames) {
-                        $nameLower = $logName.ToLower()
-                        if ($availableLogsLower.ContainsKey($nameLower)) {
-                            $logsToQuery += $availableLogsLower[$nameLower]
+                        if ([string]::IsNullOrWhiteSpace($logName)) { continue }
+                        
+                        try {
+                            # Check for wildcard characters
+                            if ($logName -match '[\*\?]') {
+                                # User specified wildcards - use -like matching
+                                $matchedLogs = $availableLogs | Where-Object { $_.LogName -like $logName }
+                                foreach ($matched in $matchedLogs) {
+                                    if ($logsToQuery -notcontains $matched.LogName) {
+                                        $logsToQuery += $matched.LogName
+                                    }
+                                }
+                            }
+                            else {
+                                # No wildcards - use substring matching (case-insensitive)
+                                # This handles "disk" matching "Microsoft-Windows-DiskDiagnostic..."
+                                $matchedLogs = $availableLogs | Where-Object { $_.LogName -like "*$logName*" }
+                                
+                                if ($matchedLogs) {
+                                    foreach ($matched in $matchedLogs) {
+                                        if ($logsToQuery -notcontains $matched.LogName) {
+                                            $logsToQuery += $matched.LogName
+                                        }
+                                    }
+                                }
+                                else {
+                                    # No matches found - add as-is (may be exact name or will fail gracefully)
+                                    if ($logsToQuery -notcontains $logName) {
+                                        $logsToQuery += $logName
+                                    }
+                                }
+                            }
                         }
-                        else {
-                            $logsToQuery += $logName
+                        catch {
+                            Write-Verbose "Error matching log name '$logName': $($_.Exception.Message)"
+                            # Add as-is on error
+                            if ($logsToQuery -notcontains $logName) {
+                                $logsToQuery += $logName
+                            }
                         }
+                    }
+                    
+                    if ($logsToQuery.Count -gt 0 -and -not $Quiet) {
+                        Write-Host "[INFO] Matched $($logsToQuery.Count) log(s) from LogNames filter" -ForegroundColor Cyan
                     }
                 }
                 else {
@@ -14028,11 +14482,13 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
 
                 try {
                     $filterHash = @{ 
-                        LogName   = $logName
-                        StartTime = $queryStartDate
-                        EndTime   = $queryEndDate 
+                        LogName = $logName
                     }
-
+                    
+                    # Only add time filters if dates are provided
+                    if ($null -ne $queryStartDate) { $filterHash.StartTime = $queryStartDate }
+                    if ($null -ne $queryEndDate) { $filterHash.EndTime = $queryEndDate }
+                    
                     if ($EventId.Count -gt 0) { $filterHash.Id = $EventId }
 
                     # PERFORMANCE: Limit events retrieved per log (CRITICAL for large logs)
@@ -14315,15 +14771,66 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
 
         # Display only if not Quiet
         if (-not $Quiet) {
-            # Prepare display message
+            # Prepare display message with dynamic truncation to ensure matches are visible
+            $displayMessage = ""
+            
             if ($msgTruncateLength -eq 0) {
                 $displayMessage = "[Message Display Disabled]"
             }
-            elseif (($msgTruncateLength -gt 0) -and ($cleanMessage.Length -gt $msgTruncateLength)) {
-                $displayMessage = $cleanMessage.Substring(0, [math]::Max(1, $msgTruncateLength)) + "..."
+            elseif ($msgTruncateLength -eq -1 -or $cleanMessage.Length -le $msgTruncateLength) {
+                # Show full message (no truncation needed)
+                $displayMessage = $cleanMessage
+            }
+            elseif ($msgTruncateLength -gt 0 -and $Search.Count -gt 0) {
+                # Dynamic truncation: Ensure first match is visible
+                try {
+                    $firstMatchPosition = -1
+                    $matchedSearchString = ""
+                    
+                    # Find the earliest match position in the message
+                    foreach ($searchStr in $Search) {
+                        if ([string]::IsNullOrWhiteSpace($searchStr)) { continue }
+                        
+                        $foundIndex = $cleanMessage.IndexOf($searchStr, [StringComparison]::OrdinalIgnoreCase)
+                        if ($foundIndex -ge 0) {
+                            if ($firstMatchPosition -eq -1 -or $foundIndex -lt $firstMatchPosition) {
+                                $firstMatchPosition = $foundIndex
+                                $matchedSearchString = $searchStr
+                            }
+                        }
+                    }
+                    
+                    if ($firstMatchPosition -ge 0) {
+                        # Found a match - ensure it's visible in truncated output
+                        $matchEndPosition = $firstMatchPosition + $matchedSearchString.Length
+                        
+                        if ($matchEndPosition -le $msgTruncateLength) {
+                            # Match is within normal truncation length - use standard truncation
+                            $displayMessage = $cleanMessage.Substring(0, [math]::Max(1, $msgTruncateLength)) + "..."
+                        }
+                        else {
+                            # Match extends beyond truncation length - extend to show full match plus context
+                            # Add 20 characters of context after the match for readability
+                            $extendedLength = [math]::Min($matchEndPosition + 20, $cleanMessage.Length)
+                            $displayMessage = $cleanMessage.Substring(0, $extendedLength) + "..."
+                            
+                            Write-Verbose "Extended message display from $msgTruncateLength to $extendedLength chars to show match"
+                        }
+                    }
+                    else {
+                        # No match found in message (matched in XML only) - use standard truncation
+                        $displayMessage = $cleanMessage.Substring(0, [math]::Max(1, $msgTruncateLength)) + "..."
+                    }
+                }
+                catch {
+                    # Error in dynamic truncation - fall back to standard truncation
+                    Write-Verbose "Error in dynamic message truncation: $($_.Exception.Message)"
+                    $displayMessage = $cleanMessage.Substring(0, [math]::Max(1, $msgTruncateLength)) + "..."
+                }
             }
             else {
-                $displayMessage = $cleanMessage
+                # No search strings - use standard truncation
+                $displayMessage = $cleanMessage.Substring(0, [math]::Max(1, $msgTruncateLength)) + "..."
             }
 
             $formattedTime = Format-DateTimeWithTimeZone -DateTime $logEvent.TimeCreated -TargetTimeZone $targetTimeZone
@@ -14369,7 +14876,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             if ($Search.Count -gt 0) {
                 Write-Host "Match    : " -NoNewline -ForegroundColor Yellow
                 if (![string]::IsNullOrWhiteSpace($logEvent.MatchedStrings)) {
-                    Write-Host $logEvent.MatchedStrings -ForegroundColor Red
+                    Write-Host $logEvent.MatchedStrings -ForegroundColor DarkRed
                 }
                 else {
                     # This should never happen after unified filtering, but handle gracefully
@@ -14565,6 +15072,8 @@ Hunts for browser artifacts, history, and network indicators across user profile
 .DESCRIPTION
 Hunt-Browser is a digital forensics function that extracts and analyzes browser history, cache data, and DNS logs to identify suspicious network activity, malicious URLs, and file system artifacts. It supports multiple browsers including Chrome, Firefox, Edge, and their variants.
 
+Cache Behavior: Once browser history is cached (via LoadTool mode), all subsequent Hunt-Browser commands automatically use the cache for faster searches. The cache persists for the PowerShell session and can be cleared with -ClearCache. Use -LoadTool to refresh cached data or -NoCache to bypass the cache for a single query.
+
 .PARAMETER Cache
 Preserves extracted browser databases for manual analysis without processing strings.
 
@@ -14577,17 +15086,35 @@ Expands detection to Search broader patterns that may generate more false positi
 .PARAMETER All
 Returns all discovered browser artifacts without filtering.
 
+.PARAMETER Extensions
+Enumerates all installed browser extensions across all browsers and user profiles.
+Displays extension metadata including name, version, description, permissions, and installation path.
+
 .PARAMETER LoadTool
 Switch to enable LoadTool mode, which uses BrowsingHistoryView tool from NirSoft for comprehensive history extraction.
 
 .PARAMETER LoadToolPath
-Optional path to local BrowsingHistoryView.exe or output CSV file. If not specified or invalid, downloads from NirSoft.
+Optional path to local BrowsingHistoryView.exe. If not specified or invalid, downloads from NirSoft.
+Also accepts directory path for CSV output (auto-generates filename) or full path with .csv extension.
+
+.PARAMETER LoadCSVPath
+Path to existing BrowsingHistoryView CSV file to load into cache for analysis.
+Use this to analyze previously exported browser history without re-running the tool.
+Records are cached for subsequent searches with different filters.
+
+.PARAMETER NoCache
+Disables caching for this query. Results will not be stored in session cache.
+Use when you want one-time analysis without affecting cached data.
+
+.PARAMETER ClearCache
+Clears the LoadTool browser history cache and exits.
+Use when you want to free memory or force fresh data collection.
 
 .PARAMETER Truncate
 Limits the display length of discovered strings to specified number of characters.
 
 .PARAMETER Search
-Array of patterns to specifically Search in results (wildcards supported).
+Array of patterns to search for in results (wildcards supported).
 
 .PARAMETER Exclude
 Array of patterns to exclude from results (wildcards supported).
@@ -14606,6 +15133,19 @@ Returns PowerShell objects for programmatic use instead of displaying results.
 
 .PARAMETER SkipConfirmation
 Skips user confirmation prompt when using LoadTool mode.
+
+.PARAMETER StartDate
+Start date for filtering browser history (LoadTool mode only).
+Accepts formats: datetime string, 'now', 'alltime', or relative format like '7d', '24h', '30m'.
+Examples: '2025-10-01', '7d' (last 7 days), '24h' (last 24 hours), 'alltime' (no filter).
+
+.PARAMETER EndDate
+End date for filtering browser history (LoadTool mode only). Defaults to 'Now'.
+Accepts same formats as StartDate parameter.
+
+.PARAMETER SortOrder
+Sort order for LoadTool results display. Valid values: "NewestFirst" (default), "OldestFirst"
+Only applies to LoadTool/cached results. Native mode uses its own sorting logic.
 
 .EXAMPLE
 Hunt-Browser
@@ -14631,23 +15171,71 @@ Uses local copy of BrowsingHistoryView.exe to extract browser history.
 Hunt-Browser -LoadTool -LoadToolPath "C:\Reports\output.csv" -SkipConfirmation
 Downloads tool and saves results to specified CSV file.
 
-    # Last 1 hour (case-insensitive)
-    Hunt-Browser -LoadTool -StartDate "1h" -SkipConfirmation
+.EXAMPLE
+Hunt-Browser -LoadCSVPath "C:\Reports\BrowsingHistory.csv" -Search "*.evil.com*"
+Loads existing CSV into cache and searches for specific domain pattern.
 
-    # Last 24 hours
-    Hunt-Browser -LoadTool -StartDate "24h" -SkipConfirmation
+.EXAMPLE
+Hunt-Browser -LoadTool -SkipConfirmation -Search "google"
+Runs LoadTool, caches results, then filters for Google-related entries.
+Subsequent searches will use cached data.
 
-    # Last 7 days
-    Hunt-Browser -LoadTool -StartDate "7d" -SkipConfirmation
+.EXAMPLE
+Hunt-Browser -LoadTool -SkipConfirmation -NoCache
+Runs LoadTool without caching results (one-time analysis).
 
-    # All time (default)
-    Hunt-Browser -LoadTool -SkipConfirmation
+.EXAMPLE
+Hunt-Browser -ClearCache
+Clears the browser history cache to free memory.
 
-    # All time (explicit)
-    Hunt-Browser -LoadTool -StartDate "AllTime" -SkipConfirmation
+.EXAMPLE
+Hunt-Browser -LoadTool -SkipConfirmation
+Hunt-Browser -Search "github"
+First command caches all browser history. Second command searches the cache without re-running the tool.
 
-    # Specific date range
-    Hunt-Browser -LoadTool -StartDate "2025-10-01" -EndDate "2025-10-14" -SkipConfirmation
+.EXAMPLE
+Hunt-Browser -LoadTool -StartDate "1h" -SkipConfirmation
+Filters browser history from the last 1 hour.
+
+.EXAMPLE
+Hunt-Browser -LoadTool -StartDate "24h" -SkipConfirmation
+Filters browser history from the last 24 hours.
+
+.EXAMPLE
+Hunt-Browser -LoadTool -StartDate "7d" -SkipConfirmation
+Filters browser history from the last 7 days.
+
+.EXAMPLE
+Hunt-Browser -LoadTool -StartDate "2025-11-02" -EndDate "2025-11-15" -SkipConfirmation
+Filters browser history for a specific date range using PowerShell datetime format.
+
+.EXAMPLE
+Hunt-Browser -LoadTool -StartDate "2025-11-02 14:30:00" -SkipConfirmation
+Filters browser history from a specific datetime.
+
+.EXAMPLE
+Hunt-Browser -LoadTool -StartDate "AllTime" -SkipConfirmation
+Loads all available browser history (no date filter).
+
+.EXAMPLE
+Hunt-Browser -LoadTool -SkipConfirmation -Search "github"
+Loads browser history and highlights matches for "github" in URL and Title fields.
+
+.EXAMPLE
+Hunt-Browser -Search "google" -SortOrder "OldestFirst"
+Searches cached browser history and displays results from oldest to newest.
+
+.EXAMPLE
+Hunt-Browser -Extensions
+Enumerates all installed browser extensions across all browsers and user profiles.
+
+.EXAMPLE
+Hunt-Browser -Extensions -Search "ublock","adblock" -OutputCSV "C:\Reports\extensions.csv"
+Searches for specific extensions and exports results to CSV.
+
+.EXAMPLE
+Hunt-Browser -Extensions -PassThru | Where-Object Permissions -like "*webRequest*"
+Returns extension objects with webRequest permissions for further analysis.
 
 .NOTES
 - Requires PowerShell 5.0 or higher
@@ -14660,7 +15248,9 @@ Downloads tool and saves results to specified CSV file.
         [switch]$Aggressive,
         [switch]$All,
         [switch]$LoadTool,
+        [switch]$Extensions,
         [string]$LoadToolPath = "",
+        [string]$LoadCSVPath = "",
         [int]$Truncate = 0,
         [string[]]$Search = @(),
         [string[]]$Exclude = @(),
@@ -14669,14 +15259,75 @@ Downloads tool and saves results to specified CSV file.
         [switch]$Quiet,
         [switch]$PassThru,
         [switch]$SkipConfirmation,
+        [switch]$NoCache,
+        [switch]$ClearCache,
         $StartDate,
-        $EndDate = "Now"
+        $EndDate = "Now",
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("OldestFirst", "NewestFirst")]
+        [string]$SortOrder = "NewestFirst"
     )
 
-    # Check for administrator privileges
-    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-    if ($null -eq $isAdmin -or -not $isAdmin) {
-        Write-Warning "Not running as Administrator, insufficient privileges may cause detection issues..."
+    # Initialize global cache if not exists
+    if ($null -eq (Get-Variable -Name "HuntBrowserCache_LoadTool" -Scope Global -ErrorAction SilentlyContinue)) {
+        $global:HuntBrowserCache_LoadTool = @{
+            Enabled        = $true
+            LastQueryTime  = $null
+            CacheCreatedAt = $null
+            Parameters     = @{
+                StartDate     = $null
+                EndDate       = $null
+                SourceCSVPath = ""
+                RecordCount   = 0
+            }
+            RawRecords     = @()  # Array of browser history records
+            Statistics     = @{
+                TotalRecords  = 0
+                CacheHits     = 0
+                CacheMisses   = 0
+                LastOperation = ""
+            }
+        }
+    }
+    
+    # Handle ClearCache parameter
+    if ($ClearCache) {
+        if ($global:HuntBrowserCache_LoadTool.RawRecords.Count -gt 0) {
+            Write-Host "Clearing Hunt-Browser LoadTool cache ($($global:HuntBrowserCache_LoadTool.RawRecords.Count) records)..." -ForegroundColor Yellow
+        }
+        
+        $global:HuntBrowserCache_LoadTool = @{
+            Enabled        = $true
+            LastQueryTime  = $null
+            CacheCreatedAt = $null
+            Parameters     = @{
+                StartDate     = $null
+                EndDate       = $null
+                SourceCSVPath = ""
+                RecordCount   = 0
+            }
+            RawRecords     = @()
+            Statistics     = @{
+                TotalRecords  = 0
+                CacheHits     = 0
+                CacheMisses   = 0
+                LastOperation = ""
+            }
+        }
+        
+        Write-Host "Hunt-Browser LoadTool cache cleared successfully." -ForegroundColor Green
+        return
+    }
+    
+    # Disable cache if NoCache switch is present
+    if ($NoCache) {
+        $global:HuntBrowserCache_LoadTool.Enabled = $false
+        if (-not $Quiet) {
+            Write-Verbose "Caching disabled for this query (NoCache switch)"
+        }
+    }
+    else {
+        $global:HuntBrowserCache_LoadTool.Enabled = $true
     }
 
     # Validate output paths early
@@ -14697,6 +15348,236 @@ Downloads tool and saves results to specified CSV file.
     $script:AllFilesToCleanup = @()
     $script:CreatedDirectories = @()
     $script:PersistentFiles = @()
+
+    function Test-LoadToolCacheValidity {
+        [CmdletBinding()]
+        param(
+            $RequestedStartDate,
+            $RequestedEndDate,
+            [string]$RequestedCSVPath
+        )
+        
+        try {
+            # Cache must be enabled and have data
+            if (-not $global:HuntBrowserCache_LoadTool.Enabled) {
+                Write-Verbose "LoadTool cache is disabled"
+                return @{ Valid = $false; Reason = "Cache disabled" }
+            }
+            
+            if ($global:HuntBrowserCache_LoadTool.RawRecords.Count -eq 0) {
+                Write-Verbose "LoadTool cache is empty"
+                return @{ Valid = $false; Reason = "Cache empty" }
+            }
+            
+            # If loading from specific CSV, check if it matches cached source
+            if (![string]::IsNullOrWhiteSpace($RequestedCSVPath)) {
+                try {
+                    $normalizedRequestPath = [System.IO.Path]::GetFullPath($RequestedCSVPath)
+                    $cachedPath = $global:HuntBrowserCache_LoadTool.Parameters.SourceCSVPath
+                    
+                    if ($normalizedRequestPath -ne $cachedPath) {
+                        Write-Verbose "Requested CSV path differs from cached source"
+                        return @{ Valid = $false; Reason = "Different CSV source"; RequiresFullRefresh = $true }
+                    }
+                }
+                catch {
+                    Write-Verbose "Error validating CSV path"
+                    return @{ Valid = $false; Reason = "CSV path validation error"; RequiresFullRefresh = $true }
+                }
+            }
+            
+            # Check date range compatibility
+            $cachedStart = $global:HuntBrowserCache_LoadTool.Parameters.StartDate
+            $cachedEnd = $global:HuntBrowserCache_LoadTool.Parameters.EndDate
+            
+            # If no dates requested (retrieve all), cache must also have all records
+            if ($null -eq $RequestedStartDate -and $null -eq $RequestedEndDate) {
+                if ($null -eq $cachedStart -and $null -eq $cachedEnd) {
+                    Write-Verbose "Cache contains ALL records, matches request for ALL records"
+                    return @{
+                        Valid     = $true
+                        UseCache  = $true
+                        FullMatch = $true
+                        Reason    = "Full cache hit - all records"
+                    }
+                }
+                else {
+                    Write-Verbose "Requesting ALL records but cache has date filters"
+                    return @{ Valid = $false; Reason = "Cache filtered, requesting all"; RequiresFullRefresh = $true }
+                }
+            }
+            
+            # If cache has all records, it can satisfy any date-filtered request
+            if ($null -eq $cachedStart -and $null -eq $cachedEnd) {
+                Write-Verbose "Cache has ALL records, can filter for requested date range"
+                return @{
+                    Valid     = $true
+                    UseCache  = $true
+                    FullMatch = $true
+                    Reason    = "Full cache hit - filtering from all records"
+                }
+            }
+            
+            # Both have dates - check if requested range is within cached range
+            if ($null -ne $RequestedStartDate -and $null -ne $cachedStart) {
+                if ($RequestedStartDate -ge $cachedStart -and 
+                    ($null -eq $RequestedEndDate -or $null -eq $cachedEnd -or $RequestedEndDate -le $cachedEnd)) {
+                    Write-Verbose "Requested date range within cached range"
+                    return @{
+                        Valid     = $true
+                        UseCache  = $true
+                        FullMatch = $true
+                        Reason    = "Full cache hit - date range subset"
+                    }
+                }
+            }
+            
+            # Requested range extends beyond cache
+            Write-Verbose "Requested range extends beyond cache"
+            return @{ Valid = $false; Reason = "Date range mismatch"; RequiresFullRefresh = $true }
+            
+        }
+        catch {
+            Write-Verbose "Error validating LoadTool cache: $($_.Exception.Message)"
+            return @{ Valid = $false; Reason = "Cache validation error"; RequiresFullRefresh = $true }
+        }
+    }
+    
+    function Get-FilteredCachedBrowserRecords {
+        [CmdletBinding()]
+        param(
+            $StartDate,
+            $EndDate,
+            [string[]]$Search,
+            [string[]]$Exclude,
+            [switch]$Quiet
+        )
+        
+        try {
+            $filtered = [System.Collections.Generic.List[PSObject]]::new()
+            
+            foreach ($record in $global:HuntBrowserCache_LoadTool.RawRecords) {
+                # Filter by date range if specified
+                if ($null -ne $StartDate -or $null -ne $EndDate) {
+                    try {
+                        # Parse the VisitTime from the cached record
+                        $visitTimeStr = $record.'Visit Time'
+                        if (![string]::IsNullOrWhiteSpace($visitTimeStr)) {
+                            # Handle various date formats: "1/5/2025 7:14:32 PM", "2025-11-02", etc.
+                            $visitTime = $null
+                            try {
+                                $visitTime = [datetime]::Parse($visitTimeStr)
+                            }
+                            catch {
+                                # Try parsing with explicit format if standard parse fails
+                                try {
+                                    $visitTime = [datetime]::ParseExact($visitTimeStr, @('M/d/yyyy h:mm:ss tt', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd', 'M/d/yyyy'), $null, [System.Globalization.DateTimeStyles]::None)
+                                }
+                                catch {
+                                    Write-Verbose "Could not parse visit time: $visitTimeStr"
+                                    continue
+                                }
+                            }
+                            
+                            if ($null -ne $visitTime) {
+                                if ($null -ne $StartDate -and $visitTime -lt $StartDate) {
+                                    continue
+                                }
+                                if ($null -ne $EndDate -and $visitTime -gt $EndDate) {
+                                    continue
+                                }
+                            }
+                        }
+                    }
+                    catch {
+                        Write-Verbose "Error filtering by date for record: $($_.Exception.Message)"
+                    }
+                }
+                
+                # Filter by Search patterns
+                if ($Search.Count -gt 0) {
+                    $matchFound = $false
+                    $url = $record.URL
+                    $title = $record.Title
+                    
+                    foreach ($pattern in $Search) {
+                        if ([string]::IsNullOrWhiteSpace($pattern)) { continue }
+                        
+                        if ($url -like "*$pattern*" -or $title -like "*$pattern*") {
+                            $matchFound = $true
+                            break
+                        }
+                    }
+                    
+                    if (-not $matchFound) { continue }
+                }
+                
+                # Filter by Exclude patterns
+                if ($Exclude.Count -gt 0) {
+                    $excluded = $false
+                    $url = $record.URL
+                    $title = $record.Title
+                    
+                    foreach ($pattern in $Exclude) {
+                        if ([string]::IsNullOrWhiteSpace($pattern)) { continue }
+                        
+                        if ($url -like "*$pattern*" -or $title -like "*$pattern*") {
+                            $excluded = $true
+                            break
+                        }
+                    }
+                    
+                    if ($excluded) { continue }
+                }
+                
+                # Record passed all filters
+                $filtered.Add($record)
+            }
+            
+            if (-not $Quiet) {
+                Write-Verbose "Filtered cache: $($filtered.Count) of $($global:HuntBrowserCache_LoadTool.RawRecords.Count) records match query"
+            }
+            
+            return $filtered
+        }
+        catch {
+            Write-Warning "Error filtering cached browser records: $($_.Exception.Message)"
+            return [System.Collections.Generic.List[PSObject]]::new()
+        }
+    }
+    
+    function Add-RecordsToLoadToolCache {
+        [CmdletBinding()]
+        param(
+            [array]$NewRecords,
+            $StartDate,
+            $EndDate,
+            [string]$SourceCSVPath
+        )
+        
+        try {
+            # Replace cache contents entirely (LoadTool always provides complete dataset)
+            $global:HuntBrowserCache_LoadTool.RawRecords = $NewRecords
+            $global:HuntBrowserCache_LoadTool.Parameters.StartDate = $StartDate
+            $global:HuntBrowserCache_LoadTool.Parameters.EndDate = $EndDate
+            $global:HuntBrowserCache_LoadTool.Parameters.SourceCSVPath = $SourceCSVPath
+            $global:HuntBrowserCache_LoadTool.Parameters.RecordCount = $NewRecords.Count
+            $global:HuntBrowserCache_LoadTool.Statistics.TotalRecords = $NewRecords.Count
+            $global:HuntBrowserCache_LoadTool.LastQueryTime = Get-Date
+            
+            if ($null -eq $global:HuntBrowserCache_LoadTool.CacheCreatedAt) {
+                $global:HuntBrowserCache_LoadTool.CacheCreatedAt = Get-Date
+            }
+            
+            Write-Verbose "LoadTool cache updated: $($NewRecords.Count) records"
+            
+            return $NewRecords.Count
+        }
+        catch {
+            Write-Warning "Error updating LoadTool cache: $($_.Exception.Message)"
+            return 0
+        }
+    }
 
 
     function ConvertTo-DateTime {
@@ -14731,10 +15612,11 @@ Downloads tool and saves results to specified CSV file.
             }
             else {
                 try {
-                    return [datetime]$InputValue
+                    # Try standard PowerShell datetime parsing
+                    return [datetime]::Parse($InputValue)
                 }
                 catch {
-                    throw "Invalid date format: $InputValue. Use datetime, 'now', 'alltime', or relative format like '7d', '24h', or '30m' (case-insensitive)"
+                    throw "Invalid date format: $InputValue. Use datetime (e.g., '2025-11-02', '2025-11-02 14:30'), 'now', 'alltime', or relative format like '7d', '24h', '30m'"
                 }
             }
         }
@@ -15219,13 +16101,13 @@ Downloads tool and saves results to specified CSV file.
                         }
                         catch { continue }
                     }
-                    # If we have Search filters but nothing matched, skip this string
+                    # If we have search filters but nothing matched, skip this string
                     if (-not $shouldInclude) {
                         continue
                     }
                 }
                 else {
-                    # No Search filters, so Search by default
+                    # No search filters, so include by default
                     $shouldInclude = $true
                 }
             
@@ -15242,7 +16124,7 @@ Downloads tool and saves results to specified CSV file.
                     }
                 }
             
-                # If we failed Search/exclude filters, skip
+                # If we failed search/exclude filters, skip
                 if (-not $shouldInclude) {
                     continue
                 }
@@ -15448,23 +16330,291 @@ Downloads tool and saves results to specified CSV file.
             [string]$OutputPath,
             [string]$Hostname,
             [string]$ExePath,
+            [string]$LoadCSVPath,
             [switch]$Quiet,
             [switch]$SkipConfirmation,
+            [switch]$NoCache,
             $StartDate,
-            $EndDate
+            $EndDate,
+            [string[]]$Search,
+            [string[]]$Exclude
         )
 
-        if (-not $Quiet) {
-            Write-Host "[TOOL] Initializing LoadTool mode..." -ForegroundColor Cyan
+        
+        # ============================================================================
+        # HANDLE LOADCSVPATH - Load existing CSV into cache
+        # ============================================================================
+        
+        if (![string]::IsNullOrWhiteSpace($LoadCSVPath)) {
+            try {
+                $csvPath = [System.IO.Path]::GetFullPath($LoadCSVPath)
+                
+                if (-not (Test-Path $csvPath -PathType Leaf)) {
+                    Write-Error "LoadCSVPath file not found: $csvPath"
+                    return @()
+                }
+                
+                if (-not $Quiet) {
+                    Write-Host "[LOADCSV] Loading existing CSV from: $csvPath" -ForegroundColor Cyan
+                }
+                
+                # Import CSV
+                $csvData = Import-Csv $csvPath -ErrorAction Stop
+                
+                if (-not $Quiet) {
+                    Write-Host "[LOADCSV] Imported $($csvData.Count) records from CSV" -ForegroundColor Green
+                }
+                
+                # Parse dates if provided (for cache metadata)
+                $parsedStartDate = if ($null -ne $StartDate -and $StartDate -ne '') { 
+                    ConvertTo-DateTime -InputValue $StartDate 
+                }
+                else { $null }
+                
+                $parsedEndDate = if ($null -ne $EndDate -and $EndDate -ne '') { 
+                    ConvertTo-DateTime -InputValue $EndDate 
+                }
+                else { $null }
+                
+                # Add to cache if caching is enabled
+                if (-not $NoCache -and $global:HuntBrowserCache_LoadTool.Enabled) {
+                    Add-RecordsToLoadToolCache -NewRecords $csvData -StartDate $parsedStartDate -EndDate $parsedEndDate -SourceCSVPath $csvPath
+                    
+                    if (-not $Quiet) {
+                        Write-Host "[CACHE] Loaded $($csvData.Count) records into cache from CSV" -ForegroundColor Green
+                    }
+                    
+                    $global:HuntBrowserCache_LoadTool.Statistics.CacheMisses++
+                    $global:HuntBrowserCache_LoadTool.Statistics.LastOperation = "Loaded from CSV file"
+                }
+                
+                # Now filter the records
+                $filteredRecords = if ($NoCache) {
+                    # Manual filtering without cache
+                    $csvData | Where-Object {
+                        $record = $_
+                        $include = $true
+                        
+                        # Date filtering
+                        if ($null -ne $parsedStartDate -or $null -ne $parsedEndDate) {
+                            try {
+                                $visitTime = [datetime]::Parse($record.'Visit Time')
+                                if ($null -ne $parsedStartDate -and $visitTime -lt $parsedStartDate) { $include = $false }
+                                if ($null -ne $parsedEndDate -and $visitTime -gt $parsedEndDate) { $include = $false }
+                            }
+                            catch { }
+                        }
+                        
+                        # Search filtering
+                        if ($include -and $Search.Count -gt 0) {
+                            $matchFound = $false
+                            foreach ($pattern in $Search) {
+                                if ($record.URL -like "*$pattern*" -or $record.Title -like "*$pattern*") {
+                                    $matchFound = $true
+                                    break
+                                }
+                            }
+                            if (-not $matchFound) { $include = $false }
+                        }
+                        
+                        # Exclude filtering
+                        if ($include -and $Exclude.Count -gt 0) {
+                            foreach ($pattern in $Exclude) {
+                                if ($record.URL -like "*$pattern*" -or $record.Title -like "*$pattern*") {
+                                    $include = $false
+                                    break
+                                }
+                            }
+                        }
+                        
+                        $include
+                    }
+                }
+                else {
+                    # Use cache filtering
+                    Get-FilteredCachedBrowserRecords -StartDate $parsedStartDate -EndDate $parsedEndDate -Search $Search -Exclude $Exclude -Quiet:$Quiet
+                }
+                
+                # Convert to result objects
+                $results = [System.Collections.Generic.List[PSObject]]::new()
+                $currentUser = if ($env:USERNAME) { $env:USERNAME } else { "Unknown" }
+                
+                foreach ($row in $filteredRecords) {
+                    try {
+                        $resultObj = [PSCustomObject]@{
+                            User         = Sanitize-Output $currentUser
+                            Browser      = Sanitize-Output ($row.'Web Browser')
+                            String       = Sanitize-Output ($row.URL)
+                            FullString   = Sanitize-Output ($row.URL)
+                            MatchPattern = "LoadCSV"
+                            Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
+                            Source       = "LoadCSV"
+                            Hostname     = Sanitize-Output $Hostname
+                            Count        = 1
+                            Title        = Sanitize-Output ($row.Title)
+                            VisitTime    = Sanitize-Output ($row.'Visit Time')
+                        }
+                        $results.Add($resultObj)
+                    }
+                    catch {
+                        Write-Warning "Failed to process CSV row: $($_.Exception.Message)"
+                        continue
+                    }
+                }
+                
+                if (-not $Quiet) {
+                    Write-Host "[SUCCESS] Processed $($results.Count) records from CSV" -ForegroundColor Green
+                }
+                
+                return $results
+            }
+            catch {
+                Write-Error "Failed to load CSV: $($_.Exception.Message)"
+                return @()
+            }
+        }
+        
+        # ============================================================================
+        # CHECK CACHE BEFORE RUNNING TOOL
+        # ============================================================================
+        
+        $parsedStartDate = $null
+        $parsedEndDate = $null
+        
+        # Parse dates for cache validation and tool execution
+        if ($null -ne $StartDate -and $StartDate -ne '') {
+            try {
+                $parsedStartDate = ConvertTo-DateTime -InputValue $StartDate
+                $parsedEndDate = if ($null -ne $EndDate -and $EndDate -ne '') { 
+                    ConvertTo-DateTime -InputValue $EndDate 
+                }
+                else { 
+                    Get-Date 
+                }
+            }
+            catch {
+                Write-Warning "Invalid date format, loading all history: $($_.Exception.Message)"
+                $parsedStartDate = $null
+                $parsedEndDate = $null
+            }
+        }
+        
+        # Check if we can use cache
+        if (-not $NoCache -and $global:HuntBrowserCache_LoadTool.Enabled) {
+            $cacheDecision = Test-LoadToolCacheValidity -RequestedStartDate $parsedStartDate -RequestedEndDate $parsedEndDate -RequestedCSVPath ""
+            
+            if ($cacheDecision.Valid -and $cacheDecision.UseCache) {
+                if (-not $Quiet) {
+                    Write-Host "[CACHE] Using cached LoadTool data ($($global:HuntBrowserCache_LoadTool.RawRecords.Count) records)" -ForegroundColor Green
+                }
+                
+                $global:HuntBrowserCache_LoadTool.Statistics.CacheHits++
+                $global:HuntBrowserCache_LoadTool.Statistics.LastOperation = "Cache hit - filtered from cache"
+                
+                # Filter cached records
+                $filteredRecords = Get-FilteredCachedBrowserRecords -StartDate $parsedStartDate -EndDate $parsedEndDate -Search $Search -Exclude $Exclude -Quiet:$Quiet
+                
+                # Convert to result objects
+                $results = [System.Collections.Generic.List[PSObject]]::new()
+                $currentUser = if ($env:USERNAME) { $env:USERNAME } else { "Unknown" }
+                
+                foreach ($row in $filteredRecords) {
+                    try {
+                        $resultObj = [PSCustomObject]@{
+                            User         = Sanitize-Output $currentUser
+                            Browser      = Sanitize-Output ($row.'Web Browser')
+                            String       = Sanitize-Output ($row.URL)
+                            FullString   = Sanitize-Output ($row.URL)
+                            MatchPattern = "LoadTool-Cached"
+                            Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
+                            Source       = "LoadTool-Cached"
+                            Hostname     = Sanitize-Output $Hostname
+                            Count        = 1
+                            Title        = Sanitize-Output ($row.Title)
+                            VisitTime    = Sanitize-Output ($row.'Visit Time')
+                        }
+                        $results.Add($resultObj)
+                    }
+                    catch {
+                        continue
+                    }
+                }
+                
+                if (-not $Quiet) {
+                    Write-Host "[CACHE] Returned $($results.Count) filtered records from cache" -ForegroundColor Green
+                }
+                
+                return $results
+            }
+            else {
+                if (-not $Quiet) {
+                    Write-Verbose "Cache miss: $($cacheDecision.Reason)"
+                }
+                
+                $global:HuntBrowserCache_LoadTool.Statistics.CacheMisses++
+                $global:HuntBrowserCache_LoadTool.Statistics.LastOperation = "Cache miss - $($cacheDecision.Reason)"
+            }
+        }
+        
+        # If we have cache data and no explicit LoadTool request, use cache for search
+        if ([string]::IsNullOrWhiteSpace($ExePath) -and 
+            [string]::IsNullOrWhiteSpace($OutputPath) -and
+            $global:HuntBrowserCache_LoadTool.RawRecords.Count -gt 0 -and
+            $global:HuntBrowserCache_LoadTool.Enabled) {
+            
+            if (-not $Quiet) {
+                Write-Host "[CACHE] Using cached data for search (no tool execution)" -ForegroundColor Green
+            }
+            
+            $global:HuntBrowserCache_LoadTool.Statistics.CacheHits++
+            $global:HuntBrowserCache_LoadTool.Statistics.LastOperation = "Cache hit - search only"
+            
+            # Filter cached records
+            $filteredRecords = Get-FilteredCachedBrowserRecords -StartDate $parsedStartDate -EndDate $parsedEndDate -Search $Search -Exclude $Exclude -Quiet:$Quiet
+            
+            # Convert to result objects
+            $results = [System.Collections.Generic.List[PSObject]]::new()
+            $currentUser = if ($env:USERNAME) { $env:USERNAME } else { "Unknown" }
+            
+            foreach ($row in $filteredRecords) {
+                try {
+                    $resultObj = [PSCustomObject]@{
+                        User         = Sanitize-Output $currentUser
+                        Browser      = Sanitize-Output ($row.'Web Browser')
+                        String       = Sanitize-Output ($row.URL)
+                        FullString   = Sanitize-Output ($row.URL)
+                        MatchPattern = "LoadTool-Cached"
+                        Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
+                        Source       = "LoadTool-Cached"
+                        Hostname     = Sanitize-Output $Hostname
+                        Count        = 1
+                        Title        = Sanitize-Output ($row.Title)
+                        VisitTime    = Sanitize-Output ($row.'Visit Time')
+                    }
+                    $results.Add($resultObj)
+                }
+                catch {
+                    continue
+                }
+            }
+            
+            if (-not $Quiet) {
+                Write-Host "[CACHE] Returned $($results.Count) filtered records from cache" -ForegroundColor Green
+            }
+            
+            return $results
         }
 
+        # ============================================================================
+        # RUN BROWSINGHISTORYVIEW TOOL
+        # ============================================================================
+        
         # Determine if we need to download or use local copy
         $useLocalCopy = $false
         $localExePath = ""
     
         if (![string]::IsNullOrWhiteSpace($ExePath)) {
             try {
-                # Validate the provided path
                 $testPath = [System.IO.Path]::GetFullPath($ExePath)
             
                 if (Test-Path $testPath -PathType Leaf -ErrorAction SilentlyContinue) {
@@ -15539,19 +16689,25 @@ Downloads tool and saves results to specified CSV file.
             } while ($true)
         }
 
-        # Determine output CSV path safely
+        # Determine output CSV path
         $outputCsv = ""
-        if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-            $outputCsv = Join-Path $env:TEMP "BrowsingHistory_$([guid]::NewGuid()).csv"
-        }
-        elseif (Test-Path $OutputPath -PathType Container -ErrorAction SilentlyContinue) {
-            $outputCsv = Join-Path $OutputPath "BrowsingHistory_$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
-        }
-        elseif ($OutputPath -match '\.csv$') {
-            $outputCsv = $OutputPath
+        $userWantsCSV = ![string]::IsNullOrWhiteSpace($OutputPath)
+        
+        if ($userWantsCSV) {
+            # User specified output path
+            if (Test-Path $OutputPath -PathType Container -ErrorAction SilentlyContinue) {
+                $outputCsv = Join-Path $OutputPath "BrowsingHistory_$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+            }
+            elseif ($OutputPath -match '\.csv$') {
+                $outputCsv = $OutputPath
+            }
+            else {
+                $outputCsv = $OutputPath + ".csv"
+            }
         }
         else {
-            $outputCsv = $OutputPath + ".csv"
+            # No user output path - use temp file that will be deleted
+            $outputCsv = Join-Path $env:TEMP "BrowsingHistory_Temp_$([guid]::NewGuid()).csv"
         }
 
         # Sanitize and resolve output path
@@ -15569,7 +16725,14 @@ Downloads tool and saves results to specified CSV file.
             if (-not (Test-Path $outputDir -ErrorAction SilentlyContinue)) {
                 New-Item -Path $outputDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
             }
-            $script:PersistentFiles += $outputCsv
+            
+            # Only mark as persistent if user wants to keep it
+            if ($userWantsCSV) {
+                $script:PersistentFiles += $outputCsv
+            }
+            else {
+                $script:AllFilesToCleanup += $outputCsv
+            }
         }
         catch {
             Write-Error "Failed to create output directory for CSV: $($_.Exception.Message)"
@@ -15581,7 +16744,6 @@ Downloads tool and saves results to specified CSV file.
 
         try {
             if ($useLocalCopy) {
-                # Use the local copy provided by user
                 $finalExePath = $localExePath
             }
             else {
@@ -15642,34 +16804,13 @@ Downloads tool and saves results to specified CSV file.
 
             # Execute the tool
             try {
-                # Process date parameters
-                $parsedStartDate = $null
-                $parsedEndDate = $null
                 $useTimeFilter = $false
                 
-                if ($null -ne $StartDate -and $StartDate -ne '') {
-                    try {
-                        $parsedStartDate = ConvertTo-DateTime -InputValue $StartDate
-                        $parsedEndDate = if ($null -ne $EndDate -and $EndDate -ne '') { 
-                            ConvertTo-DateTime -InputValue $EndDate 
-                        }
-                        else { 
-                            Get-Date 
-                        }
+                if ($null -ne $parsedStartDate) {
+                    # Check if start date is "all time" (1970)
+                    if ($parsedStartDate.Year -gt 1970) {
+                        $useTimeFilter = $true
                         
-                        # Check if start date is "all time" (1970) - if so, don't use time filter
-                        if ($parsedStartDate.Year -gt 1970) {
-                            $useTimeFilter = $true
-                            
-                            if (-not $Quiet) {
-                                Write-Host "[DEBUG]    Start: $($parsedStartDate.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor DarkGray
-                                Write-Host "[DEBUG]    End:   $($parsedEndDate.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor DarkGray
-                            }
-                        }
-                    }
-                    catch {
-                        Write-Warning "Invalid date format, loading all history: $($_.Exception.Message)"
-                        $useTimeFilter = $false
                     }
                 }
                 
@@ -15677,9 +16818,6 @@ Downloads tool and saves results to specified CSV file.
                 $safeOutputPath = "`"$outputCsv`""
                 
                 if ($useTimeFilter) {
-                    # CRITICAL: BrowsingHistoryView uses EUROPEAN date format (dd-mm-yyyy) with 24-hour time
-                    # Format: dd-mm-yyyy HH:mm:ss (day-month-year hour:minute:second in 24-hour format)
-                    # Example from docs: "10-01-2012 12:00:00" means January 10, 2012 at 12:00 PM
                     $startDateStr = $parsedStartDate.ToString("dd-MM-yyyy HH:mm:ss")
                     $endDateStr = $parsedEndDate.ToString("dd-MM-yyyy HH:mm:ss")
                     
@@ -15697,7 +16835,6 @@ Downloads tool and saves results to specified CSV file.
                     }
                 }
                 else {
-                    # No time filter - load all history (default behavior)
                     $arguments = @(
                         "/HistorySource", "1",
                         "/VisitTimeFilterType", "1",
@@ -15708,10 +16845,16 @@ Downloads tool and saves results to specified CSV file.
                     if (-not $Quiet) {
                         Write-Host "[FILTER]   Loading all available history (no date filter)" -ForegroundColor Cyan
                     }
-                }        
+                }
+                
                 if (-not $Quiet) {
                     Write-Host "[EXEC]     Executing BrowsingHistoryView..." -ForegroundColor Green
-                    Write-Host "[OUTPUT]   Results will be saved to: $outputCsv" -ForegroundColor Cyan
+                    if ($userWantsCSV) {
+                        Write-Host "[OUTPUT]   CSV will be saved to: $outputCsv" -ForegroundColor Cyan
+                    }
+                    else {
+                        Write-Host "[OUTPUT]   Using temporary CSV (will be deleted after processing)" -ForegroundColor Cyan
+                    }
                 }
         
                 $proc = Start-Process -FilePath $finalExePath -ArgumentList $arguments -Wait -PassThru -NoNewWindow -ErrorAction Stop
@@ -15719,19 +16862,59 @@ Downloads tool and saves results to specified CSV file.
                 if ($proc.ExitCode -eq 0 -and (Test-Path $outputCsv -ErrorAction SilentlyContinue)) {
                     try {
                         $csvData = Import-Csv $outputCsv -ErrorAction Stop
+                        
+                        # Add RAW records to cache if caching is enabled
+                        if (-not $NoCache -and $global:HuntBrowserCache_LoadTool.Enabled) {
+                            Add-RecordsToLoadToolCache -NewRecords $csvData -StartDate $parsedStartDate -EndDate $parsedEndDate -SourceCSVPath $outputCsv
+                            
+                            if (-not $Quiet) {
+                                Write-Host "[CACHE] Cached $($csvData.Count) RAW records from BrowsingHistoryView" -ForegroundColor Green
+                            }
+                        }
+                        
+                        # Now filter the records
+                        $filteredRecords = if ($NoCache) {
+                            # Manual filtering
+                            $csvData | Where-Object {
+                                $record = $_
+                                $include = $true
+                                
+                                # Search filtering
+                                if ($Search.Count -gt 0) {
+                                    $matchFound = $false
+                                    foreach ($pattern in $Search) {
+                                        if ($record.URL -like "*$pattern*" -or $record.Title -like "*$pattern*") {
+                                            $matchFound = $true
+                                            break
+                                        }
+                                    }
+                                    if (-not $matchFound) { $include = $false }
+                                }
+                                
+                                # Exclude filtering
+                                if ($include -and $Exclude.Count -gt 0) {
+                                    foreach ($pattern in $Exclude) {
+                                        if ($record.URL -like "*$pattern*" -or $record.Title -like "*$pattern*") {
+                                            $include = $false
+                                            break
+                                        }
+                                    }
+                                }
+                                
+                                $include
+                            }
+                        }
+                        else {
+                            # Use cache filtering (even though we just cached, this applies Search/Exclude)
+                            Get-FilteredCachedBrowserRecords -StartDate $parsedStartDate -EndDate $parsedEndDate -Search $Search -Exclude $Exclude -Quiet:$Quiet
+                        }
                 
                         $currentUser = if ($env:USERNAME) { $env:USERNAME } else { "Unknown" }
                         
-                        # CRITICAL: Use List<PSObject> instead of array/ArrayList to prevent enumerator corruption
                         $results = [System.Collections.Generic.List[PSObject]]::new()
                         
-                        foreach ($row in $csvData) {
+                        foreach ($row in $filteredRecords) {
                             try {
-                                # CRITICAL: CSV column names have spaces - use dot notation with quotes
-                                $webBrowser = $row.'Web Browser'
-                                $visitTime = $row.'Visit Time'
-                                
-                                # CRITICAL: CSV column names have spaces
                                 $resultObj = [PSCustomObject]@{
                                     User         = Sanitize-Output $currentUser
                                     Browser      = Sanitize-Output ($row.'Web Browser')
@@ -15751,18 +16934,23 @@ Downloads tool and saves results to specified CSV file.
                                 Write-Warning "Failed to process CSV row: $($_.Exception.Message)"
                                 continue
                             }
-                        }                
-                        if (-not $Quiet) {
-                            Write-Host "[SUCCESS]  Extracted $($results.Count) browser history entries" -ForegroundColor Green
-                            Write-Host "[SAVED]    CSV file preserved at: $outputCsv" -ForegroundColor Green
                         }
                 
-                        # CRITICAL: Do NOT wrap List<PSObject> in @() - it corrupts the objects!
-                        # Return the List directly - PowerShell will handle it correctly
+                        if (-not $Quiet) {
+                            Write-Host "[SUCCESS]  Extracted $($results.Count) browser history entries" -ForegroundColor Green
+                            if ($userWantsCSV) {
+                                Write-Host "[SAVED]    CSV file preserved at: $outputCsv" -ForegroundColor Green
+                            }
+                            else {
+                                Write-Host "[TEMP]     Temporary CSV will be cleaned up" -ForegroundColor Yellow
+                            }
+                        }
+                
                         return $results
                     }
                     catch {
-                        if (-not $Quiet) {
+                        Write-Error "Failed to parse CSV: $($_.Exception.Message)"
+                        if ($userWantsCSV -and -not $Quiet) {
                             Write-Host "[SAVED]    CSV file preserved at: $outputCsv" -ForegroundColor Green
                         }
                         return @()
@@ -15784,9 +16972,6 @@ Downloads tool and saves results to specified CSV file.
             return @()
         }
     }
-
-    # Keep all other existing functions (Get-InstalledBrowsers, Get-UserProfiles, etc.) unchanged
-    # but add the missing functions referenced above:
 
     function Get-InstalledBrowsers {
         $browsers = @()
@@ -15868,6 +17053,353 @@ Downloads tool and saves results to specified CSV file.
         }
     
         return $browsers
+    }
+
+    function Get-BrowserExtensions {
+        [CmdletBinding()]
+        param(
+            [string]$UserProfile,
+            [string]$UserName,
+            [string]$Hostname,
+            [string[]]$Search = @(),
+            [string[]]$Exclude = @(),
+            [switch]$Quiet
+        )
+        
+        $extensions = @()
+        
+        try {
+            if (-not (Test-Path $UserProfile -PathType Container -ErrorAction SilentlyContinue)) {
+                return @()
+            }
+            
+            # Define browser extension paths
+            $browserPaths = @(
+                # Chrome variants
+                @{
+                    Browser = "Chrome"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Google\Chrome\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Chrome Beta"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Google\Chrome Beta\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Chrome Dev"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Google\Chrome Dev\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Chrome Canary"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Google\Chrome SxS\User Data\*\Extensions"
+                },
+                # Edge variants
+                @{
+                    Browser = "Edge"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Microsoft\Edge\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Edge Beta"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Microsoft\Edge Beta\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Edge Dev"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Microsoft\Edge Dev\User Data\*\Extensions"
+                },
+                # Other Chromium browsers
+                @{
+                    Browser = "Brave"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Opera"
+                    Type    = "Chromium"
+                    Path    = "AppData\Roaming\Opera Software\Opera Stable\Extensions"
+                },
+                @{
+                    Browser = "Opera GX"
+                    Type    = "Chromium"
+                    Path    = "AppData\Roaming\Opera Software\Opera GX Stable\Extensions"
+                },
+                @{
+                    Browser = "Vivaldi"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Vivaldi\User Data\*\Extensions"
+                },
+                @{
+                    Browser = "Yandex"
+                    Type    = "Chromium"
+                    Path    = "AppData\Local\Yandex\YandexBrowser\User Data\*\Extensions"
+                },
+                # Firefox
+                @{
+                    Browser = "Firefox"
+                    Type    = "Firefox"
+                    Path    = "AppData\Roaming\Mozilla\Firefox\Profiles\*\extensions"
+                }
+            )
+            
+            foreach ($browserDef in $browserPaths) {
+                try {
+                    $extensionBasePath = Join-Path $UserProfile $browserDef.Path
+                    
+                    # Handle wildcard paths
+                    if ($extensionBasePath -like "*\*\*") {
+                        $parentPath = Split-Path (Split-Path $extensionBasePath -Parent) -Parent
+                        if (-not (Test-Path $parentPath -ErrorAction SilentlyContinue)) {
+                            continue
+                        }
+                        
+                        $profileDirs = Get-ChildItem $parentPath -Directory -ErrorAction SilentlyContinue
+                        $extensionDirs = @()
+                        
+                        foreach ($profileDir in $profileDirs) {
+                            $extPath = Join-Path $profileDir.FullName "Extensions"
+                            if (Test-Path $extPath -ErrorAction SilentlyContinue) {
+                                $extensionDirs += $extPath
+                            }
+                        }
+                    }
+                    else {
+                        if (-not (Test-Path $extensionBasePath -ErrorAction SilentlyContinue)) {
+                            continue
+                        }
+                        $extensionDirs = @($extensionBasePath)
+                    }
+                    
+                    foreach ($extDir in $extensionDirs) {
+                        try {
+                            if ($browserDef.Type -eq "Firefox") {
+                                # Firefox extensions
+                                $firefoxExtensions = Get-ChildItem $extDir -File -Filter "*.xpi" -ErrorAction SilentlyContinue
+                                
+                                foreach ($xpiFile in $firefoxExtensions) {
+                                    try {
+                                        $extId = $xpiFile.BaseName
+                                        
+                                        # Try to read manifest from XPI (it's a ZIP file)
+                                        Add-Type -AssemblyName System.IO.Compression.FileSystem
+                                        $zip = [System.IO.Compression.ZipFile]::OpenRead($xpiFile.FullName)
+                                        $manifestEntry = $zip.Entries | Where-Object { $_.Name -eq "manifest.json" } | Select-Object -First 1
+                                        
+                                        if ($manifestEntry) {
+                                            $stream = $manifestEntry.Open()
+                                            $reader = New-Object System.IO.StreamReader($stream)
+                                            $manifestJson = $reader.ReadToEnd()
+                                            $reader.Close()
+                                            $stream.Close()
+                                            $zip.Dispose()
+                                            
+                                            $manifest = $manifestJson | ConvertFrom-Json
+                                            
+                                            $extName = if ($manifest.name) { $manifest.name } else { $extId }
+                                            $extVersion = if ($manifest.version) { $manifest.version } else { "Unknown" }
+                                            $extDescription = if ($manifest.description) { $manifest.description } else { "" }
+                                            
+                                            # Apply search/exclude filters
+                                            if ($Search.Count -gt 0) {
+                                                $matchFound = $false
+                                                foreach ($pattern in $Search) {
+                                                    if ($extName -like "*$pattern*" -or $extDescription -like "*$pattern*" -or $extId -like "*$pattern*") {
+                                                        $matchFound = $true
+                                                        break
+                                                    }
+                                                }
+                                                if (-not $matchFound) { continue }
+                                            }
+                                            
+                                            if ($Exclude.Count -gt 0) {
+                                                $excluded = $false
+                                                foreach ($pattern in $Exclude) {
+                                                    if ($extName -like "*$pattern*" -or $extDescription -like "*$pattern*" -or $extId -like "*$pattern*") {
+                                                        $excluded = $true
+                                                        break
+                                                    }
+                                                }
+                                                if ($excluded) { continue }
+                                            }
+                                            
+                                            # Extract proper extension ID from manifest
+                                            $finalExtId = $extId
+                                            if ($manifest.browser_specific_settings.gecko.id) {
+                                                $finalExtId = $manifest.browser_specific_settings.gecko.id
+                                            }
+                                            elseif ($manifest.applications.gecko.id) {
+                                                $finalExtId = $manifest.applications.gecko.id
+                                            }
+                                            
+                                            $extensions += [PSCustomObject]@{
+                                                User        = $UserName
+                                                Browser     = $browserDef.Browser
+                                                ExtensionID = $finalExtId
+                                                Name        = $extName
+                                                Version     = $extVersion
+                                                Description = $extDescription
+                                                Permissions = ""
+                                                InstallPath = $xpiFile.FullName
+                                                Hostname    = $Hostname
+                                            }
+                                        }
+                                        else {
+                                            $zip.Dispose()
+                                        }
+                                    }
+                                    catch {
+                                        Write-Verbose "Failed to process Firefox extension: $($xpiFile.Name) - $($_.Exception.Message)"
+                                        continue
+                                    }
+                                }
+                            }
+                            else {
+                                # Chromium-based extensions
+                                $extensionFolders = Get-ChildItem $extDir -Directory -ErrorAction SilentlyContinue
+                                
+                                foreach ($extFolder in $extensionFolders) {
+                                    try {
+                                        $extId = $extFolder.Name
+                                        
+                                        # Find the highest version folder
+                                        $versionFolders = Get-ChildItem $extFolder.FullName -Directory -ErrorAction SilentlyContinue | 
+                                        Sort-Object Name -Descending | Select-Object -First 1
+                                        
+                                        if (-not $versionFolders) { continue }
+                                        
+                                        $manifestPath = Join-Path $versionFolders.FullName "manifest.json"
+                                        
+                                        if (Test-Path $manifestPath -ErrorAction SilentlyContinue) {
+                                            try {
+                                                $manifestContent = Get-Content $manifestPath -Raw -ErrorAction Stop
+                                                $manifest = $manifestContent | ConvertFrom-Json -ErrorAction Stop
+                                                
+                                                $extName = if ($manifest.name) { 
+                                                    # Handle Chrome i18n names
+                                                    if ($manifest.name -match '^__MSG_(.+)__$') {
+                                                        # Try to read from _locales
+                                                        $msgKey = $matches[1]
+                                                        $localesPath = Join-Path $versionFolders.FullName "_locales\en\messages.json"
+                                                        if (Test-Path $localesPath -ErrorAction SilentlyContinue) {
+                                                            try {
+                                                                $localesContent = Get-Content $localesPath -Raw -ErrorAction Stop
+                                                                $locales = $localesContent | ConvertFrom-Json -ErrorAction Stop
+                                                                if ($locales.$msgKey.message) {
+                                                                    $locales.$msgKey.message
+                                                                }
+                                                                else {
+                                                                    $manifest.name
+                                                                }
+                                                            }
+                                                            catch {
+                                                                $manifest.name
+                                                            }
+                                                        }
+                                                        else {
+                                                            $manifest.name
+                                                        }
+                                                    }
+                                                    else {
+                                                        $manifest.name
+                                                    }
+                                                }
+                                                else { 
+                                                    $extId 
+                                                }
+                                                
+                                                $extVersion = if ($manifest.version) { $manifest.version } else { "Unknown" }
+                                                $extDescription = if ($manifest.description) { 
+                                                    if ($manifest.description -match '^__MSG_(.+)__$') {
+                                                        ""
+                                                    }
+                                                    else {
+                                                        $manifest.description
+                                                    }
+                                                }
+                                                else { "" }
+                                                
+                                                # Extract permissions
+                                                $permissions = @()
+                                                if ($manifest.permissions) {
+                                                    $permissions += $manifest.permissions
+                                                }
+                                                if ($manifest.host_permissions) {
+                                                    $permissions += $manifest.host_permissions
+                                                }
+                                                $permissionsStr = ($permissions | Sort-Object -Unique) -join ", "
+                                                
+                                                # Apply search/exclude filters
+                                                if ($Search.Count -gt 0) {
+                                                    $matchFound = $false
+                                                    foreach ($pattern in $Search) {
+                                                        if ($extName -like "*$pattern*" -or $extDescription -like "*$pattern*" -or 
+                                                            $extId -like "*$pattern*" -or $permissionsStr -like "*$pattern*") {
+                                                            $matchFound = $true
+                                                            break
+                                                        }
+                                                    }
+                                                    if (-not $matchFound) { continue }
+                                                }
+                                                
+                                                if ($Exclude.Count -gt 0) {
+                                                    $excluded = $false
+                                                    foreach ($pattern in $Exclude) {
+                                                        if ($extName -like "*$pattern*" -or $extDescription -like "*$pattern*" -or 
+                                                            $extId -like "*$pattern*" -or $permissionsStr -like "*$pattern*") {
+                                                            $excluded = $true
+                                                            break
+                                                        }
+                                                    }
+                                                    if ($excluded) { continue }
+                                                }
+                                                
+                                                $extensions += [PSCustomObject]@{
+                                                    User        = $UserName
+                                                    Browser     = $browserDef.Browser
+                                                    ExtensionID = $extId
+                                                    Name        = $extName
+                                                    Version     = $extVersion
+                                                    Description = $extDescription
+                                                    Permissions = $permissionsStr
+                                                    InstallPath = $versionFolders.FullName
+                                                    Hostname    = $Hostname
+                                                }
+                                            }
+                                            catch {
+                                                Write-Verbose "Failed to parse manifest for $extId`: $($_.Exception.Message)"
+                                                continue
+                                            }
+                                        }
+                                    }
+                                    catch {
+                                        Write-Verbose "Failed to process extension folder: $($extFolder.Name) - $($_.Exception.Message)"
+                                        continue
+                                    }
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Failed to process extension directory: $extDir - $($_.Exception.Message)"
+                            continue
+                        }
+                    }
+                }
+                catch {
+                    Write-Verbose "Failed to process browser: $($browserDef.Browser) - $($_.Exception.Message)"
+                    continue
+                }
+            }
+            
+            return $extensions
+        }
+        catch {
+            Write-Verbose "Failed to enumerate extensions for user $UserName`: $($_.Exception.Message)"
+            return @()
+        }
     }
 
     function Get-UserProfiles {
@@ -16132,6 +17664,239 @@ Downloads tool and saves results to specified CSV file.
         catch { }
     }
 
+    function Write-HighlightedMessage {
+        param(
+            [string]$Message,
+            [string[]]$SearchStrings,
+            [string]$NormalColor = "Cyan",
+            [string]$HighlightColor = "Red"
+        )
+        
+        if ([string]::IsNullOrWhiteSpace($Message) -or $SearchStrings.Count -eq 0) {
+            Write-Host $Message -ForegroundColor $NormalColor
+            return
+        }
+        
+        try {
+            # Build a list of all match positions for all search strings
+            $allMatches = @()
+            
+            foreach ($searchStr in $SearchStrings) {
+                if ([string]::IsNullOrWhiteSpace($searchStr)) { continue }
+                
+                # Find all occurrences of this search string (case-insensitive)
+                $position = 0
+                while ($position -lt $Message.Length) {
+                    $foundIndex = $Message.IndexOf($searchStr, $position, [StringComparison]::OrdinalIgnoreCase)
+                    
+                    if ($foundIndex -ge 0) {
+                        $allMatches += [PSCustomObject]@{
+                            Start = $foundIndex
+                            End   = $foundIndex + $searchStr.Length
+                            Text  = $Message.Substring($foundIndex, $searchStr.Length)
+                        }
+                        $position = $foundIndex + 1
+                    }
+                    else {
+                        break
+                    }
+                }
+            }
+            
+            if ($allMatches.Count -eq 0) {
+                Write-Host $Message -ForegroundColor $NormalColor
+                return
+            }
+            
+            # Sort matches by start position and merge overlapping matches
+            $sortedMatches = $allMatches | Sort-Object Start
+            $mergedMatches = @()
+            $currentMatch = $null
+            
+            foreach ($match in $sortedMatches) {
+                if ($null -eq $currentMatch) {
+                    $currentMatch = $match
+                }
+                elseif ($match.Start -le $currentMatch.End) {
+                    # Overlapping or adjacent - extend current match
+                    if ($match.End -gt $currentMatch.End) {
+                        $currentMatch.End = $match.End
+                        $currentMatch.Text = $Message.Substring($currentMatch.Start, $currentMatch.End - $currentMatch.Start)
+                    }
+                }
+                else {
+                    # Non-overlapping - save current and start new
+                    $mergedMatches += $currentMatch
+                    $currentMatch = $match
+                }
+            }
+            # Add the last match
+            if ($null -ne $currentMatch) {
+                $mergedMatches += $currentMatch
+            }
+            
+            # Print the message with highlights
+            $lastEnd = 0
+            foreach ($match in $mergedMatches) {
+                # Print text before match (normal color)
+                if ($match.Start -gt $lastEnd) {
+                    $beforeText = $Message.Substring($lastEnd, $match.Start - $lastEnd)
+                    Write-Host $beforeText -NoNewline -ForegroundColor $NormalColor
+                }
+                
+                # Print matched text (highlighted color)
+                Write-Host $match.Text -NoNewline -ForegroundColor $HighlightColor
+                
+                $lastEnd = $match.End
+            }
+            
+            # Print remaining text after last match
+            if ($lastEnd -lt $Message.Length) {
+                $afterText = $Message.Substring($lastEnd)
+                Write-Host $afterText -NoNewline -ForegroundColor $NormalColor
+            }
+            
+            # End the line
+            Write-Host ""
+        }
+        catch {
+            Write-Verbose "Error highlighting message: $($_.Exception.Message)"
+            Write-Host $Message -ForegroundColor $NormalColor
+        }
+    }
+
+    function Write-ExtensionResult {
+        param($Extension)
+        
+        try {
+            Write-Host ""
+            Write-Host "----------------------------------------" -ForegroundColor Gray
+            
+            Write-Host "Name         : " -NoNewline -ForegroundColor Yellow
+            Write-Host $Extension.Name -ForegroundColor Cyan
+            
+            Write-Host "Extension ID : " -NoNewline -ForegroundColor Yellow
+            Write-Host $Extension.ExtensionID -ForegroundColor White
+            
+            Write-Host "Version      : " -NoNewline -ForegroundColor Yellow
+            Write-Host $Extension.Version -ForegroundColor White
+            
+            Write-Host "Browser      : " -NoNewline -ForegroundColor Yellow
+            Write-Host $Extension.Browser -ForegroundColor White
+            
+            Write-Host "User         : " -NoNewline -ForegroundColor Yellow
+            Write-Host $Extension.User -ForegroundColor DarkYellow
+            
+            if (![string]::IsNullOrWhiteSpace($Extension.Description)) {
+                Write-Host "Description  : " -NoNewline -ForegroundColor Yellow
+                Write-Host $Extension.Description -ForegroundColor Gray
+            }
+            
+            if (![string]::IsNullOrWhiteSpace($Extension.Permissions)) {
+                Write-Host "Permissions  : " -NoNewline -ForegroundColor Yellow
+                Write-Host $Extension.Permissions -ForegroundColor Red
+            }
+            
+            Write-Host "Install Path : " -NoNewline -ForegroundColor Yellow
+            Write-Host $Extension.InstallPath -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Verbose "Error displaying extension result: $($_.Exception.Message)"
+        }
+    }
+
+    function Write-LoadToolBrowserResult {
+        param(
+            $BrowserRecord,
+            [string[]]$SearchStrings = @()
+        )
+    
+        try {
+            Write-Host ""
+            Write-Host "----------------------------------------" -ForegroundColor Gray
+            
+            # Visit Time (always show first if present)
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Time')) {
+                Write-Host "Time     : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Time' -ForegroundColor White
+            }
+            
+            # URL (always show if present) - with highlighting
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.URL)) {
+                Write-Host "URL      : " -NoNewline -ForegroundColor Yellow
+                if ($SearchStrings.Count -gt 0) {
+                    Write-HighlightedMessage -Message $BrowserRecord.URL -SearchStrings $SearchStrings -NormalColor "Cyan" -HighlightColor "Red"
+                }
+                else {
+                    Write-Host $BrowserRecord.URL -ForegroundColor Cyan
+                }
+            }
+            
+            # Title - with highlighting
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.Title)) {
+                Write-Host "Title    : " -NoNewline -ForegroundColor Yellow
+                if ($SearchStrings.Count -gt 0) {
+                    Write-HighlightedMessage -Message $BrowserRecord.Title -SearchStrings $SearchStrings -NormalColor "White" -HighlightColor "Red"
+                }
+                else {
+                    Write-Host $BrowserRecord.Title -ForegroundColor White
+                }
+            }
+            
+            # Web Browser
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Web Browser')) {
+                Write-Host "Browser  : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Web Browser' -ForegroundColor White
+            }
+            
+            # Visit Count
+            if ($null -ne $BrowserRecord.'Visit Count' -and $BrowserRecord.'Visit Count' -ne '' -and $BrowserRecord.'Visit Count' -ne '0') {
+                Write-Host "Count    : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Count' -ForegroundColor White
+            }
+            
+            # Visit Type
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Type')) {
+                Write-Host "Type     : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Type' -ForegroundColor White
+            }
+            
+            # Visit Duration
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Duration')) {
+                Write-Host "Duration : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Duration' -ForegroundColor White
+            }
+            
+            # User Profile
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'User Profile')) {
+                Write-Host "User     : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'User Profile' -ForegroundColor White
+            }
+            
+            # Browser Profile
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Browser Profile')) {
+                Write-Host "Profile  : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Browser Profile' -ForegroundColor White
+            }
+            
+            # History File
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'History File')) {
+                Write-Host "File     : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'History File' -ForegroundColor Gray
+            }
+            
+            # Record ID
+            if ($null -ne $BrowserRecord.'Record ID' -and $BrowserRecord.'Record ID' -ne '') {
+                Write-Host "ID       : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Record ID' -ForegroundColor Gray
+            }
+            
+        }
+        catch { 
+            Write-Verbose "Error displaying LoadTool result: $($_.Exception.Message)"
+        }
+    }
+
 
     function Complete-Cleanup {
         param([switch]$Quiet)
@@ -16233,10 +17998,7 @@ Downloads tool and saves results to specified CSV file.
                     $cleanupReport.Errors | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
                 }
             
-                if ($cleanupReport.FilesRemoved.Count -eq 0 -and $cleanupReport.DirectoriesRemoved.Count -eq 0 -and $cleanupReport.Errors.Count -eq 0) {
-                    Write-Host "[INFO] No temporary files to clean up" -ForegroundColor Green
-                }
-                else {
+                if ($cleanupReport.FilesRemoved.Count -gt 0 -or $cleanupReport.DirectoriesRemoved.Count -gt 0) {
                     Write-Host "[COMPLETE] Cleanup finished successfully" -ForegroundColor Green
                 }
             
@@ -16275,6 +18037,125 @@ Downloads tool and saves results to specified CSV file.
     }
     if ($LoadToolPath) {
         $LoadToolPath = Resolve-SafePath -Path $LoadToolPath -AllowNew
+    }
+    
+    # Handle Extensions mode early
+    if ($Extensions) {
+        if (-not $Quiet) {
+            Write-Host "[MODE] Extensions enumeration mode" -ForegroundColor Cyan
+        }
+        
+        try {
+            $userProfiles = Get-UserProfiles
+            $allExtensions = @()
+            $fullhostname = ([Net.Dns]::GetHostByName($env:computerName)).HostName
+            $hostname = if ($fullhostname) { $fullhostname } else { "Unknown" }
+            
+            foreach ($userProfile in $userProfiles) {
+                try {
+                    $userName = "Unknown"
+                    if ($userProfile -and ![string]::IsNullOrWhiteSpace($userProfile)) {
+                        try {
+                            $leafName = Split-Path $userProfile.Trim() -Leaf
+                            if (![string]::IsNullOrWhiteSpace($leafName)) {
+                                $userName = $leafName
+                            }
+                        }
+                        catch {
+                            if ($userProfile -like "*\*") {
+                                $lastSlash = $userProfile.LastIndexOf('\')
+                                if ($lastSlash -ge 0 -and $lastSlash -lt ($userProfile.Length - 1)) {
+                                    $userName = $userProfile.Substring($lastSlash + 1)
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (-not $Quiet) {
+                        Write-Host "[USER] Scanning extensions for: $userName" -ForegroundColor Yellow
+                    }
+                    
+                    $userExtensions = Get-BrowserExtensions -UserProfile $userProfile -UserName $userName -Hostname $hostname -Search $Search -Exclude $Exclude -Quiet:$Quiet
+                    
+                    if ($userExtensions -and $userExtensions.Count -gt 0) {
+                        if (-not $Quiet) {
+                            Write-Host "[FOUND] $($userExtensions.Count) extensions for $userName" -ForegroundColor Green
+                        }
+                        $allExtensions += $userExtensions
+                    }
+                }
+                catch {
+                    Write-Verbose "Failed to process user profile: $userProfile - $($_.Exception.Message)"
+                    continue
+                }
+            }
+            
+            if ($allExtensions.Count -gt 0) {
+                if (-not $Quiet) {
+                    Write-Host "[RESULTS] Found $($allExtensions.Count) browser extensions" -ForegroundColor Green
+                    
+                    # Group by User -> Browser
+                    $groupedByUser = $allExtensions | Group-Object User | Sort-Object Name
+                    
+                    foreach ($userGroup in $groupedByUser) {
+                        $groupedByBrowser = $userGroup.Group | Group-Object Browser | Sort-Object Name
+                        
+                        foreach ($browserGroup in $groupedByBrowser) {
+                            $sortedExtensions = $browserGroup.Group | Sort-Object Name
+                            
+                            foreach ($ext in $sortedExtensions) {
+                                Write-ExtensionResult $ext
+                            }
+                        }
+                    }
+                }
+                
+                # Export to CSV if requested
+                if ($OutputCSV) {
+                    try {
+                        if (Test-Path $OutputCSV -PathType Container -ErrorAction SilentlyContinue) {
+                            $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+                            $OutputCSV = Join-Path $OutputCSV "Hunt-Browser-Extensions-$timestamp.csv"
+                        }
+                        
+                        $parentDir = Split-Path $OutputCSV -Parent
+                        if ($null -ne $parentDir -and -not (Test-Path $parentDir -ErrorAction SilentlyContinue)) {
+                            New-Item -Path $parentDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                        }
+                        
+                        $allExtensions | Export-Csv -Path $OutputCSV -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+                        
+                        if (-not $Quiet) {
+                            Write-Host "[CSV] Exported $($allExtensions.Count) extensions to: $OutputCSV" -ForegroundColor Green
+                        }
+                    }
+                    catch {
+                        Write-Error "Failed to export CSV: $($_.Exception.Message)"
+                    }
+                }
+                
+                if ($PassThru) {
+                    return $allExtensions
+                }
+            }
+            else {
+                if (-not $Quiet) {
+                    Write-Host "[INFO] No browser extensions found" -ForegroundColor Yellow
+                }
+                
+                if ($PassThru) {
+                    return @()
+                }
+            }
+        }
+        catch {
+            Write-Error "Extensions enumeration failed: $($_.Exception.Message)"
+            if ($PassThru) {
+                return @()
+            }
+        }
+        
+        return
     }
     
     # Determine mode logic
@@ -16324,8 +18205,8 @@ Downloads tool and saves results to specified CSV file.
     $fullhostname = ([Net.Dns]::GetHostByName($env:computerName)).HostName
     $hostname = if ($fullhostname) { $fullhostname } else { "Unknown" }
     
-    # Process dates - show info only if date filtering is being used
-    if ($null -ne $StartDate -and $StartDate -ne '') {
+    # Display date filter info (LoadTool/LoadCSV mode only, not for cache searches)
+    if ($isLoadToolMode -and $null -ne $StartDate -and $StartDate -ne '') {
         try {
             $parsedStartDate = ConvertTo-DateTime -InputValue $StartDate
             $parsedEndDate = if ($null -ne $EndDate -and $EndDate -ne '') { 
@@ -16351,25 +18232,98 @@ Downloads tool and saves results to specified CSV file.
             Write-Warning "Date parsing failed, defaulting to all history: $($_.Exception.Message)"
         }
     }
-    else {
-        if (-not $Quiet) {
-            Write-Host "[DATE] No date filter specified, loading all available history" -ForegroundColor Cyan
-        }
-    }
     
     try {
-        # Handle LoadTool mode
-        if ($isLoadToolMode) {
-            $results = Invoke-LoadToolMode -OutputPath $LoadToolPath -ExePath $LoadToolPath -Hostname $hostname -Quiet:$Quiet -SkipConfirmation:$SkipConfirmation -StartDate $StartDate -EndDate $EndDate
-            if ($OutputCSV) {
-                Export-ResultsToCSV -Results $results -Path $OutputCSV -Quiet:$Quiet
+        # ALWAYS use cache if available (unless explicitly using LoadTool/LoadCSV to refresh)
+        $useCacheForSearch = $false
+        if (-not $isLoadToolMode -and 
+            [string]::IsNullOrWhiteSpace($LoadCSVPath) -and 
+            $global:HuntBrowserCache_LoadTool.RawRecords.Count -gt 0 -and
+            $global:HuntBrowserCache_LoadTool.Enabled) {
+            $useCacheForSearch = $true
+            if (-not $Quiet) {
+                Write-Host "[CACHE] Using cached browser history ($($global:HuntBrowserCache_LoadTool.RawRecords.Count) records)" -ForegroundColor Green
             }
-    
-            # LoadTool mode always returns objects (legacy behavior)
-            # But respect PassThru for consistency
-            if ($PassThru) {
-                return $results
+        }
+        
+        # Handle LoadTool mode or cache search
+        if ($isLoadToolMode -or ![string]::IsNullOrWhiteSpace($LoadCSVPath) -or $useCacheForSearch) {
+            $results = Invoke-LoadToolMode -OutputPath $LoadToolPath -ExePath $LoadToolPath -LoadCSVPath $LoadCSVPath -Hostname $hostname -Quiet:$Quiet -SkipConfirmation:$SkipConfirmation -NoCache:$NoCache -StartDate $StartDate -EndDate $EndDate -Search $Search -Exclude $Exclude
+            
+            # Display LoadTool results (no uniqueness grouping - show all records sorted by visit time)
+            if ($results -and $results.Count -gt 0) {
+                if (-not $Quiet) {
+                    Write-Host "[RESULTS] Found $($results.Count) browser history entries" -ForegroundColor Green
+                    
+                    # Parse dates for display filtering if specified
+                    $displayStartDate = $null
+                    $displayEndDate = $null
+                    
+                    if ($null -ne $StartDate -and $StartDate -ne '') {
+                        try {
+                            $displayStartDate = ConvertTo-DateTime -InputValue $StartDate
+                            $displayEndDate = if ($null -ne $EndDate -and $EndDate -ne '') { 
+                                ConvertTo-DateTime -InputValue $EndDate 
+                            }
+                            else { 
+                                Get-Date 
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Could not parse dates for display filtering: $($_.Exception.Message)"
+                        }
+                    }
+                    
+                    # Use Get-FilteredCachedBrowserRecords for consistent filtering
+                    $displayRecords = Get-FilteredCachedBrowserRecords -StartDate $displayStartDate -EndDate $displayEndDate -Search $Search -Exclude $Exclude -Quiet:$Quiet
+                    
+                    # Sort by Visit Time (most recent first)
+                    $sortedRecords = $displayRecords | Sort-Object {
+                        try {
+                            [datetime]::Parse($_.'Visit Time')
+                        }
+                        catch {
+                            [datetime]::MinValue
+                        }
+                    } -Descending
+                    
+                    # Display each record with search highlighting
+                    foreach ($record in $sortedRecords) {
+                        try {
+                            Write-LoadToolBrowserResult -BrowserRecord $record -SearchStrings $Search
+                        }
+                        catch {
+                            Write-Verbose "Failed to display record: $($_.Exception.Message)"
+                        }
+                    }
+                }
+                
+                # Export to CSV if requested (use converted results for CSV)
+                if ($OutputCSV) {
+                    Export-ResultsToCSV -Results $results -Path $OutputCSV -Quiet:$Quiet
+                }
+                
+                # Return objects based on PassThru parameter
+                if ($PassThru) {
+                    # Return raw cached records instead of converted results
+                    if ($global:HuntBrowserCache_LoadTool.RawRecords.Count -gt 0) {
+                        return $displayRecords
+                    }
+                    else {
+                        return $results
+                    }
+                }
             }
+            else {
+                if (-not $Quiet) {
+                    Write-Host "`n[INFO] No matching browser history detected" -ForegroundColor Green
+                }
+                
+                if ($PassThru) {
+                    return @()
+                }
+            }
+            
             return
         }
         
@@ -16386,7 +18340,13 @@ Downloads tool and saves results to specified CSV file.
                 return
             }
         }
-        
+
+        # Inform user that native mode is running (no cache available)
+        if (-not $Quiet) {
+            Write-Host "[INFO] Running in Native mode (string extraction from browser databases)" -ForegroundColor Cyan
+            Write-Host "[TIP] Use 'Hunt-Browser -LoadTool -SkipConfirmation' to cache history for faster future searches" -ForegroundColor Yellow
+        }
+               
         # Auto-detect browsers
         try {
             $browsers = Get-InstalledBrowsers
@@ -18907,12 +20867,6 @@ Searches all hives including unloaded user profiles for "evil.exe".
         [Parameter(Mandatory = $false)]
         [switch]$Quiet
     )
-
-    # Check for administrator privileges
-    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-    if ($null -eq $isAdmin -or -not $isAdmin) {
-        Write-Warning "Not running as Administrator, insufficient privileges may cause detection issues..."
-    }
 
     # Store hive parameter in script scope to avoid validation conflicts
     $script:HiveFilter = $Hive
