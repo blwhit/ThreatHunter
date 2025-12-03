@@ -7,84 +7,39 @@
 # [X] Hunt-Persistence
 # [X] Hunt-Logs
 # [X] Hunt-ForensicDump
-# [X] Hunt-VirusTotal
 # [X] Hunt-Browser
-# ---
 # [X] Hunt-Files
+# [X] Hunt-VirusTotal
+# [X] Hunt-Services
 # [X] Hunt-Tasks
 # [X] Hunt-Registry
-# [X] Hunt-Services
 # -----------------------------
 
+#   Function Reviews and Future Features:
+# ========================================
+# - Hunt-ForensicDump: could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
+# - Hunt-ForensicDump: add a base64 string of the Compressed Arrchive of all EVTX logs? That way you will always have all event logs..... is this possible?
+# - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... 
+# - Hunt-ForensicDump: Review CSV Output files for formatting/etc.
+# - Hunt-Logs: add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
+# - Hunt-Tasks: add path filtering/searching (param)
+# - Hunt-Tasks (i think): review logic for getting the hash of the executable vs the scriptFile
 
-#   Global Notes:
-# -------------------
-# - Make Wiki
-# - Spend genuine time building and tuning the IOC and string lists
-# - !!!  add caching functionality to other subfunctions (add -DontCache switch, use in ForensicDump to avoid extra PS session vars)... cache cmdlet search results in PS variable for quicker subsequent searching 
-# - ADD switch "-BrowserExtensions" to Hunt-Browser to get the browser extensions loaded on the machine for all browsers.. can copy existing logic.. return as objects...
-# - will packaging as PS2EXE make it work on older windows computers? research
-# - add defensive powershell version check to each function init... add defensive input param validation/sanitization, admin checks, internet checks, etc...
-# - add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
-# - add path filtering/searching to Hunt-Tasks
-# - review logic for getting the hash of the executable vs the scriptFile... make sure its sound and expected output... sometimes fields are getting mixed up...
-# - review CSV outputs for all Forensic Dump data...
-
-
-
-#   HUNT-FORENSICDUMP (future options):
-# =====================
-# - could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
-# - Consider reordering tabs in importance/likelihood of usage
-# - take the extra space printing out of the Hunt-Browser execution for the forensic dump... printing an extra newline, not clean
-# - add a base64 string of the Compressed Arrchive of all EVTX logs? That way you will always have all event logs..... is this possible?
-# ---------------------------------------------
-# - validate "LoadFromJson" switch manually and use the switch-- test it in VM
-# - research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... 
-
-#   HUNT-FILES:
-# =====================
-# - add caching like hunt-logs, so users can make subsequent searches (add dont cache switch???)
-
-#   HUNT-BROWSER:
-# =====================
-
-#   HUNT-LOGS:
-# =====================
-
-#   HUNT-PERSISTENCE:
-# =====================
-# - Hunt-Persistence: fix registry dismounting, and understand consequences -- "WARNING: Failed to dismount TEMP_DFIR_"
-# - Hunt-Persistence: Fix why in "All" mode, the flags are not all being set right.... only certain flags are being set (missing bad signatures/etc.)...
-# - Hunt-Persistence: Change it to try and look for NTUSER.DAT files as well, so it loads all registry hives and searches all users in 'HKEY Users'... make sure we are always searching all users
-# - Hunt-Persistence path errors.. error building paths for some reason... consider 'test-path' validations, etc.. 
-# - Hunt-Persistence ".json" vs ".js" extensions need seperated/fixed
-# - Hunt-Persistence: General review of the logic. Review and make sure we are able to return ALL persistence objects if needed... verify that ALL get returned-- vaildate results...
-# - add caching? like in the other functions (add dont cache switch???)
-
-
-#   Final/Full Review & Pass-Through of All
+#   Final/Full Review & To Do
 # --------------------------------------------
-# - Review each function: Give full description for wiki page (every parameter and feature), and give examples, and make sure to LIST ANY NECESSARY ASSEMBLY IMPORTS (need this for the module manifest)
-# - Have AI teach you and tell you everything about each subfunction
-# - Learn and document every single function, and every feature inside each function
-# - Re-Learn how to use each function, audit paramter usage and input parameter features
-# - Have AI write a WIKI page for every single function/cmdlet
-# - Use AI to audit and scrutinize cmdlets... ask strong question to investigate if usage/functionality is actually working or correct
-# - Do a general review check for any critical errors
+# - Make Wiki
+# - Finalize suspicious/IOC string lists
+# - Review each funtion: Full description, Every parameter/feature/sub-function (with examples)
+# - Full review of usage and every parameter/feature audit
 # - Rename and standardize any variable names (loadtool vs loadbrowsertool, etc.)
-# - redo and update all Synopsis/Parameters/Notes/Examples sections
-# - check for multiple parameter combination edge cases that cause unexpected outputs/collision errors
-# - add github tag to the init?
-# - add help page? "-h"
-
+# - Review and update all Synopsis/Parameters/Notes/Examples sections
 
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 
 # Script Variables
-
+# -------------------
 # Hunt-Persistence
 $script:SuspiciousStringIOCs = @(
     "client32.exe",
@@ -159,7 +114,642 @@ $script:GlobalLogIOCs = @(
 )
 
 
+
+# Script Helper Functions 
+
+function Get-FileFromCommandLine {
+    param([String]$CommandLine)
+
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+        return $null
+    }
+
+    try {
+        # Expand environment variables
+        $expanded = [System.Environment]::ExpandEnvironmentVariables($CommandLine.Trim())
+        
+        # 1. COMPATTELRUNNER.EXE with -m: parameter - extract the executable, not the DLL
+        if ($expanded -match '(.*compattelrunner\.exe)\s+-m:') {
+            return $matches[1]
+        }
+        
+        # 2. CMD.EXE executing files - extract the target file
+        if ($expanded -match 'cmd\.exe.*?/[dc]\s+([A-Za-z]:\\[^"\s]+\.(?:cmd|bat|ps1|vbs|js)(?!on)\b)') {
+            return $matches[1]
+        }
+        if ($expanded -match 'cmd\.exe.*?/[dc]\s+"([^"]+\.(?:cmd|bat|ps1|vbs|js)(?!on)\b)"') {
+            return $matches[1]
+        }
+        if ($expanded -match 'cmd\.exe.*?/[dc]\s+([^"\s]+\.(?:cmd|bat|ps1|vbs|js)(?!on)\b)') {
+            return $matches[1]
+        }
+        
+        # 3. POWERSHELL.EXE executing files - extract script files or executables
+        if ($expanded -match 'powershell\.exe.*?-[Ff]ile\s+"?([^"\s]+\.(?:ps1|bat|cmd|exe|vbs|js)(?!on)\b)"?') {
+            return $matches[1]
+        }
+        if ($expanded -match 'powershell\.exe.*?"[^"]*([A-Za-z]:\\[^"]*\.(?:ps1|bat|cmd|exe|vbs|js|dll)(?!on)\b)[^"]*"') {
+            return $matches[1]
+        }
+        if ($expanded -match 'powershell\.exe.*?&\s+([A-Za-z]:\\[^"\s]+\.(?:ps1|bat|cmd|exe|vbs|js)(?!on)\b)') {
+            return $matches[1]
+        }
+        if ($expanded -match 'powershell\.exe.*?\.\s+([A-Za-z]:\\[^"\s]+\.(?:ps1|bat|cmd|exe|vbs|js)(?!on)\b)') {
+            return $matches[1]
+        }
+        
+        # 4. NODE.EXE executing JavaScript files
+        if ($expanded -match 'node\.exe\s+"?([^"\s]+\.js)(?!on)\b"?') {
+            return $matches[1]
+        }
+        
+        # 5. PYTHON.EXE executing Python files
+        if ($expanded -match 'python\.exe\s+"?([^"\s]+\.py)"?') {
+            return $matches[1]
+        }
+        
+        # 6. WSCRIPT.EXE / CSCRIPT.EXE executing scripts
+        if ($expanded -match '(?:wscript|cscript)\.exe\s+"?([^"\s]+\.(?:vbs|js|wsf)(?!on)\b)"?') {
+            return $matches[1]
+        }
+        
+        # 7. MSHTA.EXE executing HTA files
+        if ($expanded -match 'mshta\.exe\s+"?([^"\s]+\.hta)"?') {
+            return $matches[1]
+        }
+        
+        # 8. REGSVR32.EXE registering DLLs
+        if ($expanded -match 'regsvr32\.exe.*?\s+"?([^"\s]+\.dll)"?') {
+            return $matches[1]
+        }
+        
+        # 9. RUNDLL32.EXE calling DLL functions - extract the DLL
+        if ($expanded -match 'rundll32\.exe\s+([A-Za-z]:\\[^,\s]+\.dll|[^,\s]+\.dll)') {
+            $dll = $matches[1]
+            # If relative path, try to resolve it
+            if ($dll -notmatch '^[A-Za-z]:') {
+                return Find-ExecutableInSystemPaths $dll
+            }
+            return $dll
+        }
+        
+        # 10. MSIEXEC.EXE installing MSI files
+        if ($expanded -match 'msiexec\.exe.*?[/\-]i\s+"?([^"\s]+\.msi)"?') {
+            return $matches[1]
+        }
+        
+        # 11. SCHTASKS.EXE with /RU (run as) pointing to executables
+        if ($expanded -match 'schtasks\.exe.*?/TR\s+"?([^"\s]+\.(exe|bat|cmd|ps1))"?') {
+            return $matches[1]
+        }
+        
+        # 12. NET.EXE or SC.EXE starting services - return the full path
+        if ($expanded -match '^(net\.exe|sc\.exe)\s+(?:start|stop|config)') {
+            $utilityName = $matches[1]
+            return Find-ExecutableInSystemPaths $utilityName
+        }
+        
+        # 13. Quoted paths - but exclude PowerShell script content
+        if ($expanded -match '"([^"]+)"' -and $matches[1] -notlike "& *" -and $matches[1] -notlike ".*-.*") {
+            $path = $matches[1].Trim()
+            # Clean trailing punctuation
+            $path = $path -replace '[,;]+$', ''
+            # Only return if it's a file path - exclude .json files
+            if ($path -match '\.(?:exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf)$' -and $path -notmatch '\.json$') {
+                return $path
+            }
+        }
+        
+        # 14. Simple drive paths with any extension - improved path validation
+        if ($expanded -match '^([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))(\s|$)') {
+            $path = $matches[1].Trim()
+            # Clean trailing punctuation and validate
+            $path = $path -replace '[,;]+$', ''
+            # Ensure path doesn't contain invalid characters
+            if ($path -notmatch '[\<\>\|\*\?]') {
+                return $path
+            }
+        }
+        
+        # 15. Drive paths with arguments - capture until first argument
+        if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+(-|/)') {
+            return $matches[1].Trim()
+        }
+        
+        # 16. Drive paths with space + word arguments (non-path arguments)
+        if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+([a-zA-Z]+)' -and $matches[3] -notmatch '^[A-Za-z]:') {
+            return $matches[1].Trim()
+        }
+        
+        # 17. UNC paths
+        if ($expanded -match '(\\\\[^\\]+\\[^\s"]+\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))') {
+            return $matches[1].Trim()
+        }
+        
+        # 18. Simple executable names with arguments - handle cases like "BthUdTask.exe $(Arg0)"
+        if ($expanded -match '^([a-zA-Z][a-zA-Z0-9]*\.(exe|com|scr|dll))(\s|$)') {
+            $file = $matches[1]
+            return Find-ExecutableInSystemPaths $file
+        }
+        
+        # 19. Look for any executable file in command line arguments - improved validation
+        if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))') {
+            $path = $matches[1] -replace '[,;]+$', ''
+            # Validate path doesn't contain invalid characters
+            if ($path -notmatch '[\<\>\|\*\?]') {
+                return $path
+            }
+        }
+        
+        # 20. FINAL FALLBACK - if nothing else worked and we have a non-empty string, return it
+        if (![string]::IsNullOrWhiteSpace($expanded)) {
+            return $expanded.Trim()
+        }
+        
+        return $null
+        
+    }
+    catch {
+        Write-Verbose "Error parsing command line '$CommandLine': $($_.Exception.Message)"
+        # Even on error, try the fallback
+        if (![string]::IsNullOrWhiteSpace($CommandLine)) {
+            return $CommandLine.Trim()
+        }
+        return $null
+    }
+}
+
+
+function Find-ExecutableInSystemPaths {
+    param([string]$FileName)
+        
+    if ([string]::IsNullOrWhiteSpace($FileName)) { 
+        return $FileName 
+    }
+        
+    # Define search paths in order of priority
+    $searchPaths = @(
+        "C:\Windows\System32",
+        "C:\Windows\SysWOW64", 
+        "C:\Windows",
+        "C:\Program Files\Windows NT\Accessories",
+        "C:\Program Files\Common Files\Microsoft Shared",
+        "C:\Windows\System32\WindowsPowerShell\v1.0\",
+        "C:\Windows\SysWOW64\WindowsPowerShell\v1.0\",
+        "C:\Users\<YourUsername>\AppData\Local\Microsoft\PowerShell\7\",
+        "C:\Program Files\PowerShell\7\"
+    )
+        
+    foreach ($searchPath in $searchPaths) {
+        $fullPath = Join-Path $searchPath $FileName
+        if (Test-Path $fullPath -ErrorAction SilentlyContinue) {
+            return $fullPath
+        }
+    }
+        
+    # If not found, return the original filename
+    return $FileName
+}
+
+
+# Script-level variable to track mounted hives across all functions
+if ($null -eq $script:GlobalMountedHives) {
+    $script:GlobalMountedHives = @()
+}
+
+function Close-RegistryHandles {
+    <#
+    .SYNOPSIS
+    Forces garbage collection to release registry handles held by PowerShell.
+    
+    .DESCRIPTION
+    Performs multiple garbage collection passes to ensure all registry handles 
+    are released before attempting to dismount hives. This is critical for
+    allowing registry hives to be dismounted cleanly.
+    #>
+    [CmdletBinding()]
+    param()
+    
+    Write-Verbose "Forcing garbage collection to release registry handles..."
+    
+    # Close all PowerShell drives pointing to registry
+    try {
+        Get-PSDrive -PSProvider Registry -ErrorAction SilentlyContinue | 
+        Where-Object { $_.Root -like "*TEMP_DFIR*" } | 
+        ForEach-Object {
+            try {
+                Remove-PSDrive -Name $_.Name -Force -ErrorAction SilentlyContinue
+                Write-Verbose "Removed PSDrive: $($_.Name)"
+            }
+            catch {
+                Write-Verbose "Could not remove PSDrive $($_.Name): $($_.Exception.Message)"
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Error enumerating PSDrives: $($_.Exception.Message)"
+    }
+    
+    # Multiple aggressive GC passes
+    for ($i = 1; $i -le 3; $i++) {
+        [System.GC]::Collect([System.GC]::MaxGeneration, [System.GCCollectionMode]::Forced)
+        [System.GC]::WaitForPendingFinalizers()
+        [System.GC]::Collect([System.GC]::MaxGeneration, [System.GCCollectionMode]::Forced)
+        Start-Sleep -Milliseconds 200
+    }
+    
+    # Additional pause to allow OS to fully release handles
+    Start-Sleep -Milliseconds 1000
+    
+    Write-Verbose "Registry handle cleanup complete"
+}
+
+function Mount-RegistryHive {
+    <#
+    .SYNOPSIS
+    Mounts an unloaded user registry hive.
+    
+    .DESCRIPTION
+    Loads an NTUSER.DAT file into the registry under HKU (HKEY_USERS) for analysis.
+    Tracks mounted hives in script-level variable for later cleanup.
+    
+    .PARAMETER NtUserPath
+    Path to the NTUSER.DAT file to mount.
+    
+    .PARAMETER SID
+    Security identifier (SID) of the user profile.
+    
+    .PARAMETER Quiet
+    Suppress informational output.
+    
+    .OUTPUTS
+    String. Returns the registry path if successful, null if failed.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NtUserPath,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$SID,
+        
+        [switch]$Quiet
+    )
+    
+    if (-not (Test-Path $NtUserPath -ErrorAction SilentlyContinue)) {
+        Write-Verbose "NTUSER.DAT not found: $NtUserPath"
+        return $null
+    }
+    
+    $mountPoint = "TEMP_DFIR_$($SID.Replace('-','_'))"
+    $testPath = "Registry::HKEY_USERS\$mountPoint"
+    
+    try {
+        # Check if already mounted
+        if (Test-Path $testPath -ErrorAction SilentlyContinue) {
+            Write-Verbose "Hive already mounted: $mountPoint"
+            $mountedHivePath = "Microsoft.PowerShell.Core\Registry::HKEY_USERS\$mountPoint"
+            
+            # Ensure it's tracked
+            if ($script:GlobalMountedHives -notcontains $mountPoint) {
+                $script:GlobalMountedHives += $mountPoint
+            }
+            
+            # (Username display removed - shown in profile discovery phase)
+            
+            return $mountedHivePath
+        }
+        
+        # Attempt to mount
+        $result = & reg.exe load "HKU\$mountPoint" $NtUserPath 2>&1
+        
+        if ($LASTEXITCODE -eq 0) {
+            # Verify the mount succeeded
+            Start-Sleep -Milliseconds 200
+            
+            if (Test-Path $testPath -ErrorAction SilentlyContinue) {
+                $mountedHivePath = "Microsoft.PowerShell.Core\Registry::HKEY_USERS\$mountPoint"
+                $script:GlobalMountedHives += $mountPoint
+                
+                Write-Verbose "Successfully mounted: $SID at $mountPoint"
+                # (Username display removed - shown in profile discovery phase)
+                
+                return $mountedHivePath
+            }
+            else {
+                Write-Verbose "Mount reported success but path not accessible: $mountPoint"
+                return $null
+            }
+        }
+        else {
+            Write-Verbose "Failed to mount $SID (exit code: $LASTEXITCODE)"
+            return $null
+        }
+    }
+    catch {
+        Write-Verbose "Error mounting $SID : $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Dismount-AllRegistryHives {
+    <#
+    .SYNOPSIS
+    Dismounts all temporarily loaded registry hives.
+    
+    .DESCRIPTION
+    Dismounts all hives tracked in the global mounted hives array, plus discovers
+    any orphaned TEMP_DFIR_ hives. Uses proper handle cleanup and reports results.
+    
+    .PARAMETER Quiet
+    Suppress informational output.
+    #>
+    [CmdletBinding()]
+    param([switch]$Quiet)
+    
+    # Discover any orphaned TEMP_DFIR_ hives
+    $discoveredHives = @()
+    try {
+        $hkuSubkeys = Get-ChildItem "Registry::HKEY_USERS" -ErrorAction SilentlyContinue
+        $discoveredHives = $hkuSubkeys | 
+        Where-Object { $_.Name -like "*TEMP_DFIR*" } | 
+        ForEach-Object { Split-Path $_.Name -Leaf }
+    }
+    catch {
+        Write-Verbose "Error discovering orphaned hives: $($_.Exception.Message)"
+    }
+    
+    # Combine tracked and discovered hives
+    $allHivesToDismount = @()
+    if ($script:GlobalMountedHives) { 
+        $allHivesToDismount += $script:GlobalMountedHives 
+    }
+    if ($discoveredHives) { 
+        $allHivesToDismount += $discoveredHives 
+    }
+    $allHivesToDismount = $allHivesToDismount | Select-Object -Unique
+    
+    if ($allHivesToDismount.Count -eq 0) {
+        Write-Verbose "No temporary hives to dismount"
+        return
+    }
+    
+    # Aggressive cleanup
+    Close-RegistryHandles
+    
+    $successCount = 0
+    $failedHives = @()
+    
+    foreach ($mountPoint in $allHivesToDismount) {
+        Write-Verbose "Attempting to dismount: $mountPoint"
+        
+        # Single attempt with proper cleanup
+        Close-RegistryHandles
+        
+        $hivePath = "Registry::HKEY_USERS\$mountPoint"
+        if (-not (Test-Path $hivePath -ErrorAction SilentlyContinue)) {
+            Write-Verbose "$mountPoint already dismounted"
+            $successCount++
+            continue
+        }
+        
+        try {
+            $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+            $pinfo.FileName = "reg.exe"
+            $pinfo.Arguments = "unload `"HKU\$mountPoint`""
+            $pinfo.UseShellExecute = $false
+            $pinfo.RedirectStandardOutput = $true
+            $pinfo.RedirectStandardError = $true
+            $pinfo.CreateNoWindow = $true
+            
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $pinfo
+            [void]$process.Start()
+            $completed = $process.WaitForExit(5000)
+            
+            if ($completed -and $process.ExitCode -eq 0) {
+                Start-Sleep -Milliseconds 200
+                if (-not (Test-Path $hivePath -ErrorAction SilentlyContinue)) {
+                    Write-Verbose "Successfully dismounted: $mountPoint"
+                    $successCount++
+                }
+                else {
+                    $failedHives += $mountPoint
+                }
+            }
+            else {
+                $failedHives += $mountPoint
+            }
+        }
+        catch {
+            $failedHives += $mountPoint
+        }
+    }
+    
+    # Clear tracking
+    $script:GlobalMountedHives = @()
+    
+    # Report results
+    if (-not $Quiet) {
+        if ($successCount -gt 0) {
+            Write-Host "[OK] Dismounted $successCount hive(s)" -ForegroundColor Green
+        }
+        if ($failedHives.Count -gt 0) {
+            Write-Host "[INFO] $($failedHives.Count) hive(s) remain mounted (will clear on reboot)" -ForegroundColor Yellow
+        }
+    }
+    
+    Write-Verbose "Dismount complete: $successCount successful, $($failedHives.Count) failed"
+}
+
+function Get-RegistryHivesForAnalysis {
+    <#
+    .SYNOPSIS
+    Gets registry hives for analysis with optional unloaded hive mounting.
+    
+    .DESCRIPTION
+    Returns a list of registry hive paths for analysis. Can optionally load
+    unloaded user profile hives for comprehensive analysis.
+    
+    .PARAMETER LoadUnloadedHives
+    If specified, attempts to mount unloaded user registry hives.
+    
+    .PARAMETER HiveFilter
+    Filter which hives to return: HKLM, HKCU, HKCR, HKU, HKCC, or All.
+    
+    .PARAMETER Quiet
+    Suppress informational output.
+    
+    .OUTPUTS
+    ArrayList of registry hive paths.
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$LoadUnloadedHives,
+        
+        [ValidateSet('HKLM', 'HKCU', 'HKCR', 'HKU', 'HKCC', 'All')]
+        [string]$HiveFilter = 'All',
+        
+        [switch]$Quiet
+    )
+    
+    $hiveList = [Collections.ArrayList]::new()
+    
+    # Check admin privileges if loading unloaded hives
+    if ($LoadUnloadedHives) {
+        $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+        
+        if (-not $isAdmin) {
+            Write-Warning "Administrator privileges required for loading unloaded hives. Continuing with loaded hives only."
+            $LoadUnloadedHives = $false
+        }
+    }
+    
+    # Add main hives based on filter
+    if ($HiveFilter -eq 'All' -or $HiveFilter -eq 'HKLM') {
+        $hklm = Get-Item Registry::HKEY_LOCAL_MACHINE -ErrorAction SilentlyContinue
+        if ($hklm) { $null = $hiveList.Add($hklm.PSPath) }
+    }
+    
+    if ($HiveFilter -eq 'All' -or $HiveFilter -eq 'HKCU') {
+        $hkcu = Get-Item Registry::HKEY_CURRENT_USER -ErrorAction SilentlyContinue
+        if ($hkcu) { $null = $hiveList.Add($hkcu.PSPath) }
+    }
+    
+    if ($HiveFilter -eq 'All' -or $HiveFilter -eq 'HKCR') {
+        $hkcr = Get-Item Registry::HKEY_CLASSES_ROOT -ErrorAction SilentlyContinue
+        if ($hkcr) { $null = $hiveList.Add($hkcr.PSPath) }
+    }
+    
+    $loadedUserHives = $null
+    if ($HiveFilter -eq 'All' -or $HiveFilter -eq 'HKU') {
+        $loadedUserHives = Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue
+        foreach ($hive in $loadedUserHives) {
+            $null = $hiveList.Add($hive.PSPath)
+        }
+    }
+    
+    if ($HiveFilter -eq 'All' -or $HiveFilter -eq 'HKCC') {
+        $hkcc = Get-Item Registry::HKEY_CURRENT_CONFIG -ErrorAction SilentlyContinue
+        if ($hkcc) { $null = $hiveList.Add($hkcc.PSPath) }
+    }
+    
+    # Load unloaded user profiles if requested
+    if ($LoadUnloadedHives -and ($HiveFilter -eq 'All' -or $HiveFilter -eq 'HKU')) {
+        if (-not $Quiet) {
+            Write-Host "[INFO] Loading unloaded user registry hives..." -ForegroundColor Yellow
+        }
+        
+        try {
+            $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+            $profiles = Get-ChildItem $profileListPath -ErrorAction Stop
+            
+            # Display all profiles that will be processed
+            if (-not $Quiet) {
+                Write-Host "`n[PROFILES]" -ForegroundColor Cyan
+                foreach ($profile in $profiles) {
+                    $sid = Split-Path $profile.Name -Leaf
+                    $profileData = Get-ItemProperty $profile.PSPath -ErrorAction SilentlyContinue
+                    
+                    if ($profileData.ProfileImagePath) {
+                        $username = Split-Path $profileData.ProfileImagePath -Leaf
+                        
+                        # Check if already loaded (including TEMP_DFIR_ mounts)
+                        $sidUnderscore = $sid.Replace('-', '_')
+                        $alreadyLoaded = $loadedUserHives | Where-Object { 
+                            $_.Name -like "*$sid*" -or $_.PSChildName -like "*TEMP_DFIR*$sidUnderscore*"
+                        }
+                        
+                        # Double-check with Test-Path for TEMP_DFIR mounts
+                        $mountPoint = "TEMP_DFIR_$sidUnderscore"
+                        $tempMountExists = Test-Path "Registry::HKEY_USERS\$mountPoint" -ErrorAction SilentlyContinue
+                        
+                        if ($alreadyLoaded -or $tempMountExists) {
+                            Write-Host "  [LOADED] " -NoNewline -ForegroundColor Green
+                        }
+                        else {
+                            Write-Host "  [MOUNTING] " -NoNewline -ForegroundColor Yellow
+                        }
+                        Write-Host "$username " -NoNewline -ForegroundColor Cyan
+                        Write-Host "($sid)" -ForegroundColor DarkGray
+                    }
+                }
+                Write-Host ""
+            }
+            
+            $mountedCount = 0
+            
+            foreach ($profile in $profiles) {
+                $sid = Split-Path $profile.Name -Leaf
+                
+                # Skip if SID is already loaded (including TEMP_DFIR_ mounts)
+                $sidUnderscore = $sid.Replace('-', '_')
+                $alreadyLoaded = $loadedUserHives | Where-Object { 
+                    $_.Name -like "*$sid*" -or $_.PSChildName -like "*TEMP_DFIR*$sidUnderscore*"
+                }
+                
+                # Also check if TEMP_DFIR mount exists
+                $mountPoint = "TEMP_DFIR_$sidUnderscore"
+                $tempMountExists = Test-Path "Registry::HKEY_USERS\$mountPoint" -ErrorAction SilentlyContinue
+                
+                if ($alreadyLoaded -or $tempMountExists) { 
+                    Write-Verbose "Profile already loaded or mounted: $sid"
+                    
+                    # If it's a TEMP_DFIR mount, add it to hiveList and tracking
+                    if ($tempMountExists) {
+                        $mountedHivePath = "Microsoft.PowerShell.Core\Registry::HKEY_USERS\$mountPoint"
+                        if ($hiveList -notcontains $mountedHivePath) {
+                            $null = $hiveList.Add($mountedHivePath)
+                        }
+                        if ($script:GlobalMountedHives -notcontains $mountPoint) {
+                            $script:GlobalMountedHives += $mountPoint
+                        }
+                    }
+                    continue 
+                }
+                
+                # Get profile path
+                $profileData = Get-ItemProperty $profile.PSPath -ErrorAction SilentlyContinue
+                if (-not $profileData.ProfileImagePath) { 
+                    Write-Verbose "No ProfileImagePath for: $sid"
+                    continue 
+                }
+                
+                $ntUserPath = Join-Path $profileData.ProfileImagePath "NTUSER.DAT"
+                
+                # Attempt to mount
+                $mountedPath = Mount-RegistryHive -NtUserPath $ntUserPath -SID $sid -Quiet:$Quiet
+                
+                if ($mountedPath) {
+                    $null = $hiveList.Add($mountedPath)
+                    $mountedCount++
+                }
+            }
+            
+            if (-not $Quiet) {
+                if ($mountedCount -gt 0) {
+                    Write-Host "[+] Successfully mounted $mountedCount unloaded user hive(s)" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "[-] No unloaded hives to mount" -ForegroundColor Yellow
+                }
+            }
+        }
+        catch {
+            Write-Warning "Failed to enumerate user profiles: $($_.Exception.Message)"
+        }
+    }
+    
+    Write-Verbose "Returning $($hiveList.Count) registry hives (Mounted: $($script:GlobalMountedHives.Count))"
+    return $hiveList
+}
+
+# -------------------
+
+
+
 # Function Exports
+# -------------------
 function Hunt-ForensicDump {
     <#
     .SYNOPSIS
@@ -7705,8 +8295,6 @@ $(
 }
 
 
-
-
 Function Hunt-Persistence {
     [CmdletBinding()]
     <#
@@ -7935,6 +8523,7 @@ https://attack.mitre.org/tactics/TA0003/
     $ErrorActionPreference = 'SilentlyContinue'
     $hostname = ([Net.Dns]::GetHostByName($env:computerName)).HostName
     $psProperties = @('PSChildName', 'PSDrive', 'PSParentPath', 'PSPath', 'PSProvider')
+    
     $systemAndUsersHives = [Collections.ArrayList]::new()
 
     function New-PersistenceObject {
@@ -7994,191 +8583,7 @@ https://attack.mitre.org/tactics/TA0003/
         return $PersistenceObject
     }
 
-    function Find-ExecutableInSystemPaths {
-        param([string]$FileName)
-        
-        if ([string]::IsNullOrWhiteSpace($FileName)) { 
-            return $FileName 
-        }
-        
-        # Define search paths in order of priority
-        $searchPaths = @(
-            "C:\Windows\System32",
-            "C:\Windows\SysWOW64", 
-            "C:\Windows",
-            "C:\Program Files\Windows NT\Accessories",
-            "C:\Program Files\Common Files\Microsoft Shared",
-            "C:\Windows\System32\WindowsPowerShell\v1.0\",
-            "C:\Windows\SysWOW64\WindowsPowerShell\v1.0\",
-            "C:\Users\<YourUsername>\AppData\Local\Microsoft\PowerShell\7\",
-            "C:\Program Files\PowerShell\7\"
-        )
-        
-        foreach ($searchPath in $searchPaths) {
-            $fullPath = Join-Path $searchPath $FileName
-            if (Test-Path $fullPath -ErrorAction SilentlyContinue) {
-                return $fullPath
-            }
-        }
-        
-        # If not found, return the original filename
-        return $FileName
-    }
-
-    function Get-FileFromCommandLine {
-        param([String]$CommandLine)
-
-        if ([string]::IsNullOrWhiteSpace($CommandLine)) {
-            return $null
-        }
-
-        try {
-            # Expand environment variables
-            $expanded = [System.Environment]::ExpandEnvironmentVariables($CommandLine.Trim())
-        
-            # 1. COMPATTELRUNNER.EXE with -m: parameter - extract the executable, not the DLL
-            if ($expanded -match '(.*compattelrunner\.exe)\s+-m:') {
-                return $matches[1]
-            }
-        
-            # 2. CMD.EXE executing files - extract the target file
-            if ($expanded -match 'cmd\.exe.*?/[dc]\s+([A-Za-z]:\\[^"\s]+\.(cmd|bat|ps1|vbs|js))') {
-                return $matches[1]
-            }
-            if ($expanded -match 'cmd\.exe.*?/[dc]\s+"([^"]+\.(cmd|bat|ps1|vbs|js))"') {
-                return $matches[1]
-            }
-            if ($expanded -match 'cmd\.exe.*?/[dc]\s+([^"\s]+\.(cmd|bat|ps1|vbs|js))') {
-                return $matches[1]
-            }
-        
-            # 3. POWERSHELL.EXE executing files - extract script files or executables
-            if ($expanded -match 'powershell\.exe.*?-[Ff]ile\s+"?([^"\s]+\.(ps1|bat|cmd|exe|vbs|js))"?') {
-                return $matches[1]
-            }
-            if ($expanded -match 'powershell\.exe.*?"[^"]*([A-Za-z]:\\[^"]*\.(ps1|bat|cmd|exe|vbs|js|dll))[^"]*"') {
-                return $matches[1]
-            }
-            if ($expanded -match 'powershell\.exe.*?&\s+([A-Za-z]:\\[^"\s]+\.(ps1|bat|cmd|exe|vbs|js))') {
-                return $matches[1]
-            }
-            if ($expanded -match 'powershell\.exe.*?\.\s+([A-Za-z]:\\[^"\s]+\.(ps1|bat|cmd|exe|vbs|js))') {
-                return $matches[1]
-            }
-        
-            # 4. NODE.EXE executing JavaScript files
-            if ($expanded -match 'node\.exe\s+"?([^"\s]+\.js)"?') {
-                return $matches[1]
-            }
-        
-            # 5. PYTHON.EXE executing Python files
-            if ($expanded -match 'python\.exe\s+"?([^"\s]+\.py)"?') {
-                return $matches[1]
-            }
-        
-            # 6. WSCRIPT.EXE / CSCRIPT.EXE executing scripts
-            if ($expanded -match '(?:wscript|cscript)\.exe\s+"?([^"\s]+\.(vbs|js|wsf))"?') {
-                return $matches[1]
-            }
-        
-            # 7. MSHTA.EXE executing HTA files
-            if ($expanded -match 'mshta\.exe\s+"?([^"\s]+\.hta)"?') {
-                return $matches[1]
-            }
-        
-            # 8. REGSVR32.EXE registering DLLs
-            if ($expanded -match 'regsvr32\.exe.*?\s+"?([^"\s]+\.dll)"?') {
-                return $matches[1]
-            }
-        
-            # 9. RUNDLL32.EXE calling DLL functions - extract the DLL
-            if ($expanded -match 'rundll32\.exe\s+([A-Za-z]:\\[^,\s]+\.dll|[^,\s]+\.dll)') {
-                $dll = $matches[1]
-                # If relative path, try to resolve it
-                if ($dll -notmatch '^[A-Za-z]:') {
-                    return Find-ExecutableInSystemPaths $dll
-                }
-                return $dll
-            }
-        
-            # 10. MSIEXEC.EXE installing MSI files
-            if ($expanded -match 'msiexec\.exe.*?[/\-]i\s+"?([^"\s]+\.msi)"?') {
-                return $matches[1]
-            }
-        
-            # 11. SCHTASKS.EXE with /RU (run as) pointing to executables
-            if ($expanded -match 'schtasks\.exe.*?/TR\s+"?([^"\s]+\.(exe|bat|cmd|ps1))"?') {
-                return $matches[1]
-            }
-        
-            # 12. NET.EXE or SC.EXE starting services - return the full path
-            if ($expanded -match '^(net\.exe|sc\.exe)\s+(?:start|stop|config)') {
-                $utilityName = $matches[1]
-                return Find-ExecutableInSystemPaths $utilityName
-            }
-        
-            # 13. Quoted paths - but exclude PowerShell script content
-            if ($expanded -match '"([^"]+)"' -and $matches[1] -notlike "& *" -and $matches[1] -notlike ".*-.*") {
-                $path = $matches[1].Trim()
-                # Clean trailing punctuation
-                $path = $path -replace '[,;]+$', ''
-                # Only return if it's a file path
-                if ($path -match '\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf)$') {
-                    return $path
-                }
-            }
-        
-            # 14. Simple drive paths with any extension
-            if ($expanded -match '^([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))(\s|$)') {
-                $path = $matches[1].Trim()
-                # Clean trailing punctuation
-                $path = $path -replace '[,;]+$', ''
-                return $path
-            }
-        
-            # 15. Drive paths with arguments - capture until first argument
-            if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+(-|/)') {
-                return $matches[1].Trim()
-            }
-        
-            # 16. Drive paths with space + word arguments (non-path arguments)
-            if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+([a-zA-Z]+)' -and $matches[3] -notmatch '^[A-Za-z]:') {
-                return $matches[1].Trim()
-            }
-        
-            # 17. UNC paths
-            if ($expanded -match '(\\\\[^\\]+\\[^\s"]+\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))') {
-                return $matches[1].Trim()
-            }
-        
-            # 18. Simple executable names with arguments - handle cases like "BthUdTask.exe $(Arg0)"
-            if ($expanded -match '^([a-zA-Z][a-zA-Z0-9]*\.(exe|com|scr|dll))(\s|$)') {
-                $file = $matches[1]
-                return Find-ExecutableInSystemPaths $file
-            }
-        
-            # 19. Look for any executable file in command line arguments
-            if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))') {
-                return $matches[1] -replace '[,;]+$', ''
-            }
-        
-            # 20. FINAL FALLBACK - if nothing else worked and we have a non-empty string, return it
-            if (![string]::IsNullOrWhiteSpace($expanded)) {
-                return $expanded.Trim()
-            }
-        
-            return $null
-        
-        }
-        catch {
-            Write-Verbose "Error parsing command line '$CommandLine': $($_.Exception.Message)"
-            # Even on error, try the fallback
-            if (![string]::IsNullOrWhiteSpace($CommandLine)) {
-                return $CommandLine.Trim()
-            }
-            return $null
-        }
-    }
+    # Moved 'Get-FileFromCommandLine' function to script helpers
 
     function Get-LnkTarget {
         param([String]$LnkPath)
@@ -8191,14 +8596,14 @@ https://attack.mitre.org/tactics/TA0003/
             return $null
         }
     
+        $shell = $null
+        $shortcut = $null
+        $targetPath = $null
+    
         try {
             $shell = New-Object -ComObject WScript.Shell
             $shortcut = $shell.CreateShortcut($LnkPath)
             $targetPath = $shortcut.TargetPath
-        
-            # Clean up COM objects
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shortcut) | Out-Null
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
         
             # Expand environment variables in target path
             if (![string]::IsNullOrWhiteSpace($targetPath)) {
@@ -8210,11 +8615,34 @@ https://attack.mitre.org/tactics/TA0003/
             }
         
             return $null
-        
         }
         catch {
             Write-Verbose "Error resolving LNK target for '$LnkPath': $($_.Exception.Message)"
             return $null
+        }
+        finally {
+            # Clean up COM objects in finally block to ensure cleanup even on error
+            if ($null -ne $shortcut) {
+                try {
+                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shortcut) | Out-Null
+                }
+                catch {
+                    Write-Verbose "Error releasing shortcut COM object: $($_.Exception.Message)"
+                }
+            }
+        
+            if ($null -ne $shell) {
+                try {
+                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
+                }
+                catch {
+                    Write-Verbose "Error releasing shell COM object: $($_.Exception.Message)"
+                }
+            }
+        
+            # Force garbage collection to ensure COM objects are released
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
         }
     }
 
@@ -8562,8 +8990,19 @@ https://attack.mitre.org/tactics/TA0003/
             foreach ($fieldValue in @($valueToCheck, $executePathToCheck)) {
                 if ($fieldValue) {
                     foreach ($ext in $script:suspiciousFileExt) {
-                        if ($fieldValue -like "*$ext*") {
-                            $flags += "SUS_EXT: '$ext'"
+                        # Special handling for .js to exclude .json
+                        if ($ext -eq '.js') {
+                            # Only match .js that is NOT part of .json
+                            # Check for .js as a standalone extension (word boundary or end of string)
+                            if ($fieldValue -match '\.js(\s|$|"|\||;|,)' -and $fieldValue -notmatch '\.json') {
+                                $flags += "SUS_EXT: '$ext'"
+                            }
+                        }
+                        else {
+                            # For all other extensions, use the original logic
+                            if ($fieldValue -like "*$ext*") {
+                                $flags += "SUS_EXT: '$ext'"
+                            }
                         }
                     }
                 }
@@ -9162,68 +9601,59 @@ https://attack.mitre.org/tactics/TA0003/
             }
         }
 
-        # Set the flags on the object
-        $PersistenceObject.Flag = ($flags | Sort-Object -Unique) -join '; '
-            
         # === MODE-SPECIFIC DECISION LOGIC ===
-
+        
+        # Common additional checks for All and Aggressive modes
+        $additionalFlags = @()
+        
+        if ($Mode -eq 'All' -or $Mode -eq 'Aggressive') {
+            # Flag unsigned executables (skip App Paths in non-Insane mode)
+            if ($executePathToCheck -and -not $hasValidSignature) {
+                if ($PersistenceObject.Technique -notlike "App Paths Hijacking" -or $Insane) {
+                    $additionalFlags += "NO_VALID_SIG"
+                }
+            }
+            
+            # Insane mode additional checks (for both All and Aggressive)
+            if ($Insane) {
+                # Flag executables in user directories
+                if ($executePathToCheck -like "*\Users\*" -and $executePathToCheck -notlike "*\Program Files*") {
+                    $additionalFlags += "USER_DIR_EXECUTABLE"
+                }
+                
+                # Flag command line execution patterns
+                if ($valueToCheck -like "*powershell*" -or $valueToCheck -like "*cmd.exe*") {
+                    $additionalFlags += "CMDLINE_EXECUTION"
+                }
+            }
+            
+            # Add additional flags to main flags array
+            if ($additionalFlags.Count -gt 0) {
+                $flags += $additionalFlags
+            }
+        }
+        
+        # Set flags on the object once (for all modes)
+        $PersistenceObject.Flag = ($flags | Sort-Object -Unique) -join '; '
+        
+        # Mode-specific return logic
         if ($Mode -eq 'All') {
-            # ALL MODE - Return everything with flags populated
+            # ALL MODE - Return everything with all flags populated
             return $true
         }
         elseif ($Mode -eq 'Auto') {
-            # Auto mode: High-fidelity, only flag clearly suspicious items
-            Write-Verbose "AUTO MODE CHECK: customSearchMatched=$customSearchMatched, flags.Count=$($flags.Count), Technique=$techniqueToCheck"
-            # CRITICAL FIX: If custom search string matched, ALWAYS return true
+            # AUTO MODE - High-fidelity, only return clearly suspicious items
             if ($customSearchMatched) {
-                Write-Verbose "RETURNING TRUE: Custom search matched"
                 return $true
             }
-            Write-Verbose "RETURNING: $($flags.Count -gt 0) (flags present: $($flags -join ', '))"
             return $flags.Count -gt 0
         }
         elseif ($Mode -eq 'Aggressive') {
-            # Aggressive mode: Include more items for broader coverage
-            if ($flags.Count -gt 0) {
-                return $true
-            }
-            else {
-                # Additional aggressive mode checks
-                $additionalFlags = @()
-            
-                # Flag anything without a valid signature
-                if ($executePathToCheck -and -not $hasValidSignature) {
-                    if ($PersistenceObject.Technique -notlike "App Paths Hijacking") {
-                        $additionalFlags += "NO_VALID_SIG"
-                    }
-                    elseif ($PersistenceObject.Technique -like "App Paths Hijacking" -and $Insane) {
-                        $additionalFlags += "NO_VALID_SIG"
-                    }
-                }
-            
-                if ($Insane) {
-                    # Flag executables in user directories
-                    if ($executePathToCheck -like "*\Users\*" -and $executePathToCheck -notlike "*\Program Files*") {
-                        $additionalFlags += "USER_DIR_EXECUTABLE"
-                    }
-            
-                    # Flag command line execution patterns
-                    if ($valueToCheck -like "*powershell*" -or $valueToCheck -like "*cmd.exe*") {
-                        $additionalFlags += "CMDLINE_EXECUTION"
-                    }
-                }   
-
-                if ($additionalFlags.Count -gt 0) {
-                    $allFlags = $flags + $additionalFlags
-                    $PersistenceObject.Flag = ($allFlags | Sort-Object -Unique) -join '; '
-                    return $true
-                }
-            
-                return $false
-            }
+            # AGGRESSIVE MODE - Return items with any flags
+            return $flags.Count -gt 0
         }
-    
-        # Fallback
+        
+        # Fallback (should never reach here)
         return $false
     }
 
@@ -9342,8 +9772,16 @@ https://attack.mitre.org/tactics/TA0003/
         
             $cleanWord = $word.Trim('"', "'", '(', ')', '[', ']')
         
-            # Skip obvious files with extensions - FIXED: Added .lnk and improved pattern
-            if ($cleanWord -match '\.(exe|dll|sys|msi|bat|cmd|ps1|vbs|reg|inf|cab|zip|rar|7z|tar|gz|pdf|docx?|xlsx?|pptx?|txt|log|cfg|conf|xml|json|ini|jpe?g|png|gif|bmp|ico|svg|mp[34]|avi|mov|wmv|js|py|html|htm|css|php|asp|aspx|lnk|scr|com|cpl|hta|wsf)$') {
+            # Skip obvious files with extensions - exclude .json but flag .js
+            if ($cleanWord -match '\.(exe|dll|sys|msi|bat|cmd|ps1|vbs|reg|inf|cab|zip|rar|7z|tar|gz|pdf|docx?|xlsx?|pptx?|txt|log|cfg|conf|xml|json|ini|jpe?g|png|gif|bmp|ico|svg|mp[34]|avi|mov|wmv|py|html|htm|css|php|asp|aspx|lnk|scr|com|cpl|hta|wsf)$') {
+                continue
+            }
+            # Separate check for .js to exclude .json
+            if ($cleanWord -match '\.js$' -and $cleanWord -notmatch '\.json$') {
+                # This is a .js file, don't skip it
+            }
+            elseif ($cleanWord -match '\.js') {
+                # This might be .json or other, skip it
                 continue
             }
         
@@ -9528,192 +9966,8 @@ https://attack.mitre.org/tactics/TA0003/
         }
     }
 
-
-    function Get-AllRegistryHives {
-        [CmdletBinding()]
-        param(
-            [Switch]$Unloaded
-        )
-        Dismount-TemporaryHives
-        $hiveList = [Collections.ArrayList]::new()
-        $script:mountedHives = @()  # Track mounted hives for cleanup
-    
-        # Check admin privileges if -Unloaded is requested
-        if ($Unloaded) {
-            $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-            if (-not $isAdmin) {
-                Write-Warning "Administrator privileges required for -Unloaded switch. Continuing with loaded hives only."
-                $Unloaded = $false
-            }
-        }
-    
-        # Add HKEY_LOCAL_MACHINE
-        $hklm = Get-Item Registry::HKEY_LOCAL_MACHINE -ErrorAction SilentlyContinue
-        if ($hklm) { $null = $hiveList.Add($hklm.PSPath) }
-    
-        # Add HKEY_CURRENT_USER  
-        $hkcu = Get-Item Registry::HKEY_CURRENT_USER -ErrorAction SilentlyContinue
-        if ($hkcu) { $null = $hiveList.Add($hkcu.PSPath) }
-    
-        # Add all HKEY_USERS subkeys (loaded user profiles)
-        $loadedUserHives = Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue
-        foreach ($hive in $loadedUserHives) {
-            $null = $hiveList.Add($hive.PSPath)
-        }
-    
-        # If -Unloaded requested, attempt to mount unloaded user profiles
-        if ($Unloaded) {
-            Write-Verbose "Attempting to load unloaded user profiles..."
-        
-            try {
-                # Get all user profiles from ProfileList
-                $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
-                $profiles = Get-ChildItem $profileListPath -ErrorAction Stop
-            
-                foreach ($profile in $profiles) {
-                    $sid = Split-Path $profile.Name -Leaf
-                
-                    # Skip if SID is already loaded
-                    $alreadyLoaded = $loadedUserHives | Where-Object { $_.Name -like "*$sid*" }
-                    if ($alreadyLoaded) { continue }
-                
-                    # Get profile path
-                    $profileData = Get-ItemProperty $profile.PSPath -ErrorAction SilentlyContinue
-                    if (-not $profileData.ProfileImagePath) { continue }
-                
-                    $ntUserPath = Join-Path $profileData.ProfileImagePath "NTUSER.DAT"
-                
-                    # Attempt to mount NTUSER.DAT
-                    if (Test-Path $ntUserPath -ErrorAction SilentlyContinue) {
-                        $mountPoint = "TEMP_DFIR_$($sid.Replace('-','_'))"
-                    
-                        try {
-                            $result = & reg.exe load "HKLM\$mountPoint" $ntUserPath 2>$null
-                            if ($LASTEXITCODE -eq 0) {
-                                # Use string path instead of Get-Item to avoid creating persistent handles
-                                $mountedHivePath = "Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\$mountPoint"
-                                $null = $hiveList.Add($mountedHivePath)
-                                $script:mountedHives += $mountPoint
-                                Write-Verbose "Mounted unloaded profile: $sid"
-                                
-                                # Small delay after mount to ensure filesystem sync
-                                Start-Sleep -Milliseconds 100
-                            }
-                            else {
-                                Write-Verbose "Failed to mount profile for SID: $sid (reg.exe exit code: $LASTEXITCODE)"
-                            }
-                        }
-                        catch {
-                            Write-Verbose "Error mounting profile $sid : $($_.Exception.Message)"
-                        }
-                    }
-                }
-            }
-            catch {
-                Write-Warning "Failed to enumerate user profiles: $($_.Exception.Message)"
-            }
-        }
-    
-        # Notify user about hive loading results
-        if ($Unloaded) {
-            if ($script:mountedHives.Count -gt 0) {
-                Write-Host "[+] Successfully mounted $($script:mountedHives.Count) unloaded user hive(s)" -ForegroundColor Green
-            }
-            else {
-                Write-Host "[-] No Registry Hives to Mount" -ForegroundColor Yellow
-            }
-        }
-
-        Write-Verbose "Found $($hiveList.Count) registry hives for scanning (Mounted: $($script:mountedHives.Count))"
-        return $hiveList
-    }
-
-    function Dismount-TemporaryHives {
-        [CmdletBinding()]
-        param()
-    
-        # Get Temp DFIR Hives by name - find all hives with the naming convention prefix "TEMP_DFIR_"
-        $TempDFIRHives = @()
-        try {
-            $hklmSubkeys = Get-ChildItem "Registry::HKEY_LOCAL_MACHINE" -ErrorAction SilentlyContinue
-            $TempDFIRHives = $hklmSubkeys | Where-Object { $_.Name -like "*TEMP_DFIR_*" } | ForEach-Object { Split-Path $_.Name -Leaf }
-        }
-        catch {
-            Write-Verbose "Error enumerating HKLM subkeys: $($_.Exception.Message)"
-        }
-        
-        if ($script:mountedHives -and $script:mountedHives.Count -gt 0 -or $TempDFIRHives.Count -gt 0) {
-            # Combine both arrays and remove duplicates
-            $allHivesToDismount = @()
-            if ($script:mountedHives) { $allHivesToDismount += $script:mountedHives }
-            if ($TempDFIRHives) { $allHivesToDismount += $TempDFIRHives }
-            $allHivesToDismount = $allHivesToDismount | Select-Object -Unique
-            
-            Write-Verbose "Cleaning up $($allHivesToDismount.Count) temporarily mounted hives..."
-            
-            # Force garbage collection to release registry handles
-            [System.GC]::Collect()
-            [System.GC]::WaitForPendingFinalizers()
-            [System.GC]::Collect()
-            
-            # Small delay to allow handles to fully close
-            Start-Sleep -Milliseconds 500
-            
-            foreach ($mountPoint in $allHivesToDismount) {
-                $maxRetries = 3
-                $retryCount = 0
-                $dismounted = $false
-                
-                while (-not $dismounted -and $retryCount -lt $maxRetries) {
-                    try {
-                        $result = & reg.exe unload "HKLM\$mountPoint" 2>$null
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-Verbose "Successfully dismounted: $mountPoint"
-                            $dismounted = $true
-                        }
-                        else {
-                            $retryCount++
-                            if ($retryCount -lt $maxRetries) {
-                                Write-Verbose "Failed to dismount $mountPoint (exit code: $LASTEXITCODE), retry $retryCount of $maxRetries"
-                                
-                                # Force another GC and wait longer
-                                [System.GC]::Collect()
-                                [System.GC]::WaitForPendingFinalizers()
-                                Start-Sleep -Milliseconds 750
-                            }
-                            else {
-                                Write-Warning "Failed to dismount $mountPoint after $maxRetries attempts (exit code: $LASTEXITCODE)"
-                            }
-                        }
-                    }
-                    catch {
-                        $retryCount++
-                        if ($retryCount -lt $maxRetries) {
-                            Write-Verbose "Error dismounting $mountPoint (retry $retryCount of $maxRetries): $($_.Exception.Message)"
-                            Start-Sleep -Milliseconds 1000
-                        }
-                        else {
-                            Write-Warning "Error dismounting $mountPoint after $maxRetries attempts: $($_.Exception.Message)"
-                        }
-                    }
-                }
-            }
-            
-            # Clear the tracking array
-            $script:mountedHives = @()
-        }
-        else {
-            Write-Verbose "No temporary hives to dismount"
-        }
-    }
-
-    # Get Registry Hives
-    if ($All -or $LoadHives) {
-        $systemAndUsersHives = Get-AllRegistryHives -Unloaded
-    }
-    else {
-        $systemAndUsersHives = Get-AllRegistryHives
-    }
+    # Get Registry Hives using shared helper
+    $systemAndUsersHives = Get-RegistryHivesForAnalysis -LoadUnloadedHives:$LoadHives -Quiet:$Quiet
 
 
     # PERSISTENCE FUNCTIONS
@@ -10376,9 +10630,33 @@ https://attack.mitre.org/tactics/TA0003/
         foreach ($hive in $systemAndUsersHives) {
             $authPackages = Get-ItemProperty -Path "$hive\SYSTEM\CurrentControlSet\Control\Lsa" -Name 'Authentication Packages' -ErrorAction SilentlyContinue
             if ($authPackages -and $authPackages.'Authentication Packages') {
-                $dlls = $authPackages.'Authentication Packages' -split '\s+' | Where-Object { $_ -ne '' }
-                foreach ($dll in $dlls) {
-                    $dllPath = "C:\Windows\System32\$dll.dll"
+                # Registry multi-string value is already an array - don't split on spaces
+                $packages = $authPackages.'Authentication Packages'
+                
+                # Ensure it's treated as an array even if single value
+                if ($packages -isnot [Array]) {
+                    $packages = @($packages)
+                }
+                
+                foreach ($package in $packages) {
+                    if ([string]::IsNullOrWhiteSpace($package)) { continue }
+                    
+                    $package = $package.Trim()
+                    
+                    # Check if package is already a full path
+                    if ($package -match '^[A-Za-z]:\\' -or $package -match '^\\\\') {
+                        $dllPath = $package
+                    }
+                    else {
+                        # Assume it's just a DLL name without path or extension
+                        if ($package -notmatch '\.dll$') {
+                            $dllPath = "C:\Windows\System32\$package.dll"
+                        }
+                        else {
+                            $dllPath = "C:\Windows\System32\$package"
+                        }
+                    }
+                    
                     $propPath = (Convert-Path -Path $authPackages.PSPath -ErrorAction SilentlyContinue) + '\Authentication Packages'
                 
                     $PersistenceObject = New-PersistenceObject -Hostname $hostname -Technique 'LSA Authentication Package DLL' -Classification 'MITRE ATT&CK T1547.002' -Path $propPath -Value $dllPath -AccessGained 'System' -Note 'DLLs specified in Authentication Packages are loaded by LSASS at machine boot for custom authentication.' -Reference 'https://attack.mitre.org/techniques/T1547/002/'
@@ -11962,9 +12240,12 @@ https://attack.mitre.org/tactics/TA0003/
             }
         }
 
-        # Cleanup
-        Dismount-TemporaryHives
+        # Convert to array for further processing
         $script:globalPersistenceObjectArray = @($script:globalPersistenceObjectArray)
+        
+        # CRITICAL: Close registry handles before attempting dismount
+        Write-Verbose "Closing registry handles after persistence hunting..."
+        Close-RegistryHandles
     
         # Handle CSV export
         if ($OutputCSV) {
@@ -12094,7 +12375,8 @@ https://attack.mitre.org/tactics/TA0003/
 
     # Final cleanup
     try {
-        Dismount-TemporaryHives
+        Dismount-AllRegistryHives -Quiet:$Quiet
+        
         if (-not $Quiet) {
             Write-Progress -Activity "Hunt-Persistence" -Completed
         }
@@ -12103,7 +12385,6 @@ https://attack.mitre.org/tactics/TA0003/
         Write-Warning "Cleanup error: $($_.Exception.Message)"
     }
 }
-
 
 
 Function Hunt-Logs {
@@ -15265,6 +15546,20 @@ Returns extension objects with webRequest permissions for further analysis.
         [ValidateSet("OldestFirst", "NewestFirst")]
         [string]$SortOrder = "NewestFirst"
     )
+    
+    # Ensure script-level pattern arrays exist with fallback defaults
+    if ($null -eq $script:suspiciousBrowserStrings) {
+        $script:suspiciousBrowserStrings = @()
+    }
+    if ($null -eq $script:suspiciousTLDs) {
+        $script:suspiciousTLDs = @()
+    }
+    if ($null -eq $script:aggressiveBrowserStrings) {
+        $script:aggressiveBrowserStrings = @()
+    }
+    if ($null -eq $script:PossibleTLDs) {
+        $script:PossibleTLDs = @()
+    }
 
     # Initialize global cache if not exists
     if ($null -eq (Get-Variable -Name "HuntBrowserCache_LoadTool" -Scope Global -ErrorAction SilentlyContinue)) {
@@ -16161,7 +16456,7 @@ Returns extension objects with webRequest permissions for further analysis.
                             foreach ($pattern in $script:suspiciousBrowserStrings) {
                                 try {
                                     if ($string -like "*$pattern*") {
-                                        $match = $pattern
+                                        $match = "[SUS_STRING] $pattern"
                                         break
                                     }
                                 }
@@ -16172,7 +16467,7 @@ Returns extension objects with webRequest permissions for further analysis.
                                 foreach ($tld in $script:suspiciousTLDs) {
                                     try {
                                         if ($string -like "*$tld*") {
-                                            $match = $tld
+                                            $match = "[SUS_TLD] $tld"
                                             break
                                         }
                                     }
@@ -16181,22 +16476,22 @@ Returns extension objects with webRequest permissions for further analysis.
                             }
                         }
                         "Aggressive" {
-                            # Check aggressive strings
+                            # Check aggressive strings first
                             foreach ($pattern in $script:aggressiveBrowserStrings) {
                                 try {
                                     if ($string -like "*$pattern*") {
-                                        $match = $pattern
+                                        $match = "[AGG_STRING] $pattern"
                                         break
                                     }
                                 }
                                 catch { continue }
                             }
-                            # Also Search Auto mode patterns
+                            # Also check Auto mode patterns if no aggressive match
                             if (-not $match) {
                                 foreach ($pattern in $script:suspiciousBrowserStrings) {
                                     try {
                                         if ($string -like "*$pattern*") {
-                                            $match = $pattern
+                                            $match = "[SUS_STRING] $pattern"
                                             break
                                         }
                                     }
@@ -16208,7 +16503,7 @@ Returns extension objects with webRequest permissions for further analysis.
                                 foreach ($tld in $script:suspiciousTLDs) {
                                     try {
                                         if ($string -like "*$tld*") {
-                                            $match = $tld
+                                            $match = "[SUS_TLD] $tld"
                                             break
                                         }
                                     }
@@ -16335,7 +16630,8 @@ Returns extension objects with webRequest permissions for further analysis.
             $StartDate,
             $EndDate,
             [string[]]$Search,
-            [string[]]$Exclude
+            [string[]]$Exclude,
+            [string]$EffectiveMode = "All"
         )
 
         
@@ -16439,12 +16735,63 @@ Returns extension objects with webRequest permissions for further analysis.
                 
                 foreach ($row in $filteredRecords) {
                     try {
+                        # Apply mode-based pattern matching to LoadCSV results
+                        $matchPattern = "LoadCSV"
+                        $url = $row.URL
+                        $title = $row.Title
+                        
+                        if (![string]::IsNullOrWhiteSpace($url) -or ![string]::IsNullOrWhiteSpace($title)) {
+                            $testString = "$url $title"
+                            
+                            # Check suspicious patterns based on mode
+                            if ($EffectiveMode -eq "Auto" -or $EffectiveMode -eq "Aggressive") {
+                                # Check suspicious strings
+                                foreach ($pattern in $script:suspiciousBrowserStrings) {
+                                    try {
+                                        if ($testString -like "*$pattern*") {
+                                            $matchPattern = "[SUS_STRING] $pattern"
+                                            break
+                                        }
+                                    }
+                                    catch { continue }
+                                }
+                                
+                                # Check suspicious TLDs if no match yet
+                                if ($matchPattern -eq "LoadCSV") {
+                                    foreach ($tld in $script:suspiciousTLDs) {
+                                        try {
+                                            if ($testString -like "*$tld*") {
+                                                $matchPattern = "[SUS_TLD] $tld"
+                                                break
+                                            }
+                                        }
+                                        catch { continue }
+                                    }
+                                }
+                                
+                                # Check aggressive patterns if in Aggressive mode
+                                if ($EffectiveMode -eq "Aggressive" -and $matchPattern -eq "LoadCSV") {
+                                    foreach ($pattern in $script:aggressiveBrowserStrings) {
+                                        try {
+                                            if ($testString -like "*$pattern*") {
+                                                $matchPattern = "[AGG_STRING] $pattern"
+                                                break
+                                            }
+                                        }
+                                        catch { continue }
+                                    }
+                                }
+                            }
+                            
+                            # Skip network indicators for LoadCSV mode (only use pattern lists)
+                        }
+                        
                         $resultObj = [PSCustomObject]@{
                             User         = Sanitize-Output $currentUser
                             Browser      = Sanitize-Output ($row.'Web Browser')
                             String       = Sanitize-Output ($row.URL)
                             FullString   = Sanitize-Output ($row.URL)
-                            MatchPattern = "LoadCSV"
+                            MatchPattern = $matchPattern
                             Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
                             Source       = "LoadCSV"
                             Hostname     = Sanitize-Output $Hostname
@@ -16518,12 +16865,63 @@ Returns extension objects with webRequest permissions for further analysis.
                 
                 foreach ($row in $filteredRecords) {
                     try {
+                        # Apply mode-based pattern matching to cached results
+                        $matchPattern = "LoadTool-Cached"
+                        $url = $row.URL
+                        $title = $row.Title
+                        
+                        if (![string]::IsNullOrWhiteSpace($url) -or ![string]::IsNullOrWhiteSpace($title)) {
+                            $testString = "$url $title"
+                            
+                            # Check suspicious patterns based on mode
+                            if ($EffectiveMode -eq "Auto" -or $EffectiveMode -eq "Aggressive") {
+                                # Check suspicious strings
+                                foreach ($pattern in $script:suspiciousBrowserStrings) {
+                                    try {
+                                        if ($testString -like "*$pattern*") {
+                                            $matchPattern = "[SUS_STRING] $pattern"
+                                            break
+                                        }
+                                    }
+                                    catch { continue }
+                                }
+                                
+                                # Check suspicious TLDs if no match yet
+                                if ($matchPattern -eq "LoadTool-Cached") {
+                                    foreach ($tld in $script:suspiciousTLDs) {
+                                        try {
+                                            if ($testString -like "*$tld*") {
+                                                $matchPattern = "[SUS_TLD] $tld"
+                                                break
+                                            }
+                                        }
+                                        catch { continue }
+                                    }
+                                }
+                                
+                                # Check aggressive patterns if in Aggressive mode
+                                if ($EffectiveMode -eq "Aggressive" -and $matchPattern -eq "LoadTool-Cached") {
+                                    foreach ($pattern in $script:aggressiveBrowserStrings) {
+                                        try {
+                                            if ($testString -like "*$pattern*") {
+                                                $matchPattern = "[AGG_STRING] $pattern"
+                                                break
+                                            }
+                                        }
+                                        catch { continue }
+                                    }
+                                }
+                            }
+                            
+                            # Skip network indicators for cached mode (only use pattern lists)
+                        }
+                        
                         $resultObj = [PSCustomObject]@{
                             User         = Sanitize-Output $currentUser
                             Browser      = Sanitize-Output ($row.'Web Browser')
                             String       = Sanitize-Output ($row.URL)
                             FullString   = Sanitize-Output ($row.URL)
-                            MatchPattern = "LoadTool-Cached"
+                            MatchPattern = $matchPattern
                             Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
                             Source       = "LoadTool-Cached"
                             Hostname     = Sanitize-Output $Hostname
@@ -16576,12 +16974,63 @@ Returns extension objects with webRequest permissions for further analysis.
             
             foreach ($row in $filteredRecords) {
                 try {
+                    # Apply mode-based pattern matching to cached results
+                    $matchPattern = "LoadTool-Cached"
+                    $url = $row.URL
+                    $title = $row.Title
+                    
+                    if (![string]::IsNullOrWhiteSpace($url) -or ![string]::IsNullOrWhiteSpace($title)) {
+                        $testString = "$url $title"
+                        
+                        # Check suspicious patterns based on mode
+                        if ($EffectiveMode -eq "Auto" -or $EffectiveMode -eq "Aggressive") {
+                            # Check suspicious strings
+                            foreach ($pattern in $script:suspiciousBrowserStrings) {
+                                try {
+                                    if ($testString -like "*$pattern*") {
+                                        $matchPattern = "[SUS_STRING] $pattern"
+                                        break
+                                    }
+                                }
+                                catch { continue }
+                            }
+                            
+                            # Check suspicious TLDs if no match yet
+                            if ($matchPattern -eq "LoadTool-Cached") {
+                                foreach ($tld in $script:suspiciousTLDs) {
+                                    try {
+                                        if ($testString -like "*$tld*") {
+                                            $matchPattern = "[SUS_TLD] $tld"
+                                            break
+                                        }
+                                    }
+                                    catch { continue }
+                                }
+                            }
+                            
+                            # Check aggressive patterns if in Aggressive mode
+                            if ($EffectiveMode -eq "Aggressive" -and $matchPattern -eq "LoadTool-Cached") {
+                                foreach ($pattern in $script:aggressiveBrowserStrings) {
+                                    try {
+                                        if ($testString -like "*$pattern*") {
+                                            $matchPattern = "[AGG_STRING] $pattern"
+                                            break
+                                        }
+                                    }
+                                    catch { continue }
+                                }
+                            }
+                        }
+                        
+                        # Skip network indicators for cached mode (only use pattern lists)
+                    }
+                    
                     $resultObj = [PSCustomObject]@{
                         User         = Sanitize-Output $currentUser
                         Browser      = Sanitize-Output ($row.'Web Browser')
                         String       = Sanitize-Output ($row.URL)
                         FullString   = Sanitize-Output ($row.URL)
-                        MatchPattern = "LoadTool-Cached"
+                        MatchPattern = $matchPattern
                         Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
                         Source       = "LoadTool-Cached"
                         Hostname     = Sanitize-Output $Hostname
@@ -16913,12 +17362,72 @@ Returns extension objects with webRequest permissions for further analysis.
                         
                         foreach ($row in $filteredRecords) {
                             try {
+                                # Apply mode-based pattern matching to LoadTool results
+                                $matchPattern = "LoadTool"
+                                $url = $row.URL
+                                $title = $row.Title
+                        
+                                if (![string]::IsNullOrWhiteSpace($url) -or ![string]::IsNullOrWhiteSpace($title)) {
+                                    $testString = "$url $title"
+                            
+                                    # Check suspicious patterns based on mode
+                                    if ($EffectiveMode -eq "Auto" -or $EffectiveMode -eq "Aggressive") {
+                                        # Check suspicious strings
+                                        foreach ($pattern in $script:suspiciousBrowserStrings) {
+                                            try {
+                                                if ($testString -like "*$pattern*") {
+                                                    $matchPattern = "[SUS_STRING] $pattern"
+                                                    break
+                                                }
+                                            }
+                                            catch { continue }
+                                        }
+                                
+                                        # Check suspicious TLDs if no match yet
+                                        if ($matchPattern -eq "LoadTool") {
+                                            foreach ($tld in $script:suspiciousTLDs) {
+                                                try {
+                                                    if ($testString -like "*$tld*") {
+                                                        $matchPattern = "[SUS_TLD] $tld"
+                                                        break
+                                                    }
+                                                }
+                                                catch { continue }
+                                            }
+                                        }
+                                
+                                        # Check aggressive patterns if in Aggressive mode
+                                        if ($EffectiveMode -eq "Aggressive" -and $matchPattern -eq "LoadTool") {
+                                            foreach ($pattern in $script:aggressiveBrowserStrings) {
+                                                try {
+                                                    if ($testString -like "*$pattern*") {
+                                                        $matchPattern = "[AGG_STRING] $pattern"
+                                                        break
+                                                    }
+                                                }
+                                                catch { continue }
+                                            }
+                                        }
+                                    }
+                            
+                                    # Check for network indicators
+                                    if ($matchPattern -eq "LoadTool") {
+                                        try {
+                                            $networkIndicator = Test-NetworkIndicators -InputString $testString
+                                            if ($networkIndicator) {
+                                                $matchPattern = "Network Indicator"
+                                            }
+                                        }
+                                        catch { }
+                                    }
+                                }
+                        
                                 $resultObj = [PSCustomObject]@{
                                     User         = Sanitize-Output $currentUser
                                     Browser      = Sanitize-Output ($row.'Web Browser')
                                     String       = Sanitize-Output ($row.URL)
                                     FullString   = Sanitize-Output ($row.URL)
-                                    MatchPattern = "LoadTool"
+                                    MatchPattern = $matchPattern
                                     Length       = if ($row.URL) { ($row.URL -replace '[^\w]', '').Length } else { 0 }
                                     Source       = "LoadTool"
                                     Hostname     = Sanitize-Output $Hostname
@@ -17652,9 +18161,6 @@ Returns extension objects with webRequest permissions for further analysis.
         
             Write-Host "Length           : " -NoNewline -ForegroundColor Yellow
             Write-Host $BrowserResult.Length -ForegroundColor DarkGray
-
-            Write-Host "Hostname         : " -NoNewline -ForegroundColor Yellow
-            Write-Host $BrowserResult.Hostname -ForegroundColor DarkGray
         
             Write-Host "Count            : " -NoNewline -ForegroundColor Yellow
             Write-Host $BrowserResult.Count -ForegroundColor DarkGray
@@ -17813,6 +18319,8 @@ Returns extension objects with webRequest permissions for further analysis.
             Write-Host ""
             Write-Host "----------------------------------------" -ForegroundColor Gray
             
+            # IMPORTANT FIELDS FIRST (Top Section)
+            
             # Visit Time (always show first if present)
             if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Time')) {
                 Write-Host "Time     : " -NoNewline -ForegroundColor Yellow
@@ -17828,6 +18336,15 @@ Returns extension objects with webRequest permissions for further analysis.
                 else {
                     Write-Host $BrowserRecord.URL -ForegroundColor Cyan
                 }
+            }
+            
+            # MatchPattern (show if it indicates a suspicious pattern)
+            if ($null -ne $BrowserRecord.MatchPattern -and 
+                $BrowserRecord.MatchPattern -ne "LoadTool" -and
+                $BrowserRecord.MatchPattern -ne "LoadCSV" -and
+                $BrowserRecord.MatchPattern -ne "LoadTool-Cached") {
+                Write-Host "Match    : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.MatchPattern -ForegroundColor Red
             }
             
             # Title - with highlighting
@@ -17847,46 +18364,48 @@ Returns extension objects with webRequest permissions for further analysis.
                 Write-Host $BrowserRecord.'Web Browser' -ForegroundColor White
             }
             
-            # Visit Count
-            if ($null -ne $BrowserRecord.'Visit Count' -and $BrowserRecord.'Visit Count' -ne '' -and $BrowserRecord.'Visit Count' -ne '0') {
-                Write-Host "Count    : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'Visit Count' -ForegroundColor White
-            }
-            
-            # Visit Type
-            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Type')) {
-                Write-Host "Type     : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'Visit Type' -ForegroundColor White
-            }
-            
-            # Visit Duration
-            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Duration')) {
-                Write-Host "Duration : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'Visit Duration' -ForegroundColor White
-            }
-            
-            # User Profile
+            # User Profile - DARK YELLOW/ORANGE
             if (![string]::IsNullOrWhiteSpace($BrowserRecord.'User Profile')) {
                 Write-Host "User     : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'User Profile' -ForegroundColor White
+                Write-Host $BrowserRecord.'User Profile' -ForegroundColor DarkYellow
             }
             
-            # Browser Profile
+            # METADATA FIELDS AT BOTTOM (Less Important) - DARK GRAY
+            
+            # Visit Count - DARK GRAY
+            if ($null -ne $BrowserRecord.'Visit Count' -and $BrowserRecord.'Visit Count' -ne '' -and $BrowserRecord.'Visit Count' -ne '0') {
+                Write-Host "Count    : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Count' -ForegroundColor DarkGray
+            }
+            
+            # Visit Type - DARK GRAY
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Type')) {
+                Write-Host "Type     : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Type' -ForegroundColor DarkGray
+            }
+            
+            # Visit Duration - DARK GRAY
+            if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Visit Duration')) {
+                Write-Host "Duration : " -NoNewline -ForegroundColor Yellow
+                Write-Host $BrowserRecord.'Visit Duration' -ForegroundColor DarkGray
+            }
+            
+            # Browser Profile - DARK GRAY
             if (![string]::IsNullOrWhiteSpace($BrowserRecord.'Browser Profile')) {
                 Write-Host "Profile  : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'Browser Profile' -ForegroundColor White
+                Write-Host $BrowserRecord.'Browser Profile' -ForegroundColor DarkGray
             }
             
-            # History File
+            # History File - DARK GRAY
             if (![string]::IsNullOrWhiteSpace($BrowserRecord.'History File')) {
                 Write-Host "File     : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'History File' -ForegroundColor Gray
+                Write-Host $BrowserRecord.'History File' -ForegroundColor DarkGray
             }
             
-            # Record ID
+            # Record ID - DARK GRAY
             if ($null -ne $BrowserRecord.'Record ID' -and $BrowserRecord.'Record ID' -ne '') {
                 Write-Host "ID       : " -NoNewline -ForegroundColor Yellow
-                Write-Host $BrowserRecord.'Record ID' -ForegroundColor Gray
+                Write-Host $BrowserRecord.'Record ID' -ForegroundColor DarkGray
             }
             
         }
@@ -18246,7 +18765,7 @@ Returns extension objects with webRequest permissions for further analysis.
         
         # Handle LoadTool mode or cache search
         if ($isLoadToolMode -or ![string]::IsNullOrWhiteSpace($LoadCSVPath) -or $useCacheForSearch) {
-            $results = Invoke-LoadToolMode -OutputPath $LoadToolPath -ExePath $LoadToolPath -LoadCSVPath $LoadCSVPath -Hostname $hostname -Quiet:$Quiet -SkipConfirmation:$SkipConfirmation -NoCache:$NoCache -StartDate $StartDate -EndDate $EndDate -Search $Search -Exclude $Exclude
+            $results = Invoke-LoadToolMode -OutputPath $LoadToolPath -ExePath $LoadToolPath -LoadCSVPath $LoadCSVPath -Hostname $hostname -Quiet:$Quiet -SkipConfirmation:$SkipConfirmation -NoCache:$NoCache -StartDate $StartDate -EndDate $EndDate -Search $Search -Exclude $Exclude -EffectiveMode $effectiveMode
             
             # Display LoadTool results (no uniqueness grouping - show all records sorted by visit time)
             if ($results -and $results.Count -gt 0) {
@@ -18286,9 +18805,70 @@ Returns extension objects with webRequest permissions for further analysis.
                     } -Descending
                     
                     # Display each record with search highlighting
+                    # First, we need to convert the display records to include MatchPattern
+                    $displayResults = [System.Collections.Generic.List[PSObject]]::new()
+                    
                     foreach ($record in $sortedRecords) {
                         try {
-                            Write-LoadToolBrowserResult -BrowserRecord $record -SearchStrings $Search
+                            # Apply pattern matching to each record for display
+                            $matchPattern = "LoadTool"
+                            $url = $record.URL
+                            $title = $record.Title
+                            
+                            if (![string]::IsNullOrWhiteSpace($url) -or ![string]::IsNullOrWhiteSpace($title)) {
+                                $testString = "$url $title"
+                                
+                                # Check suspicious patterns based on effective mode
+                                if ($effectiveMode -eq "Auto" -or $effectiveMode -eq "Aggressive") {
+                                    # Check suspicious strings
+                                    foreach ($pattern in $script:suspiciousBrowserStrings) {
+                                        try {
+                                            if ($testString -like "*$pattern*") {
+                                                $matchPattern = "[SUS_STRING] $pattern"
+                                                break
+                                            }
+                                        }
+                                        catch { continue }
+                                    }
+                                    
+                                    # Check suspicious TLDs if no match yet
+                                    if ($matchPattern -eq "LoadTool") {
+                                        foreach ($tld in $script:suspiciousTLDs) {
+                                            try {
+                                                if ($testString -like "*$tld*") {
+                                                    $matchPattern = "[SUS_TLD] $tld"
+                                                    break
+                                                }
+                                            }
+                                            catch { continue }
+                                        }
+                                    }
+                                    
+                                    # Check aggressive patterns if in Aggressive mode
+                                    if ($effectiveMode -eq "Aggressive" -and $matchPattern -eq "LoadTool") {
+                                        foreach ($pattern in $script:aggressiveBrowserStrings) {
+                                            try {
+                                                if ($testString -like "*$pattern*") {
+                                                    $matchPattern = "[AGG_STRING] $pattern"
+                                                    break
+                                                }
+                                            }
+                                            catch { continue }
+                                        }
+                                    }
+                                }
+                                
+                                # Skip network indicators for LoadTool mode (only use pattern lists)
+                            }
+                            
+                            # Add MatchPattern to the record
+                            $displayRecord = $record.PSObject.Copy()
+                            $displayRecord | Add-Member -MemberType NoteProperty -Name "MatchPattern" -Value $matchPattern -Force
+                            
+                            # Only show records that match patterns in Auto/Aggressive mode
+                            if ($effectiveMode -eq "All" -or $matchPattern -ne "LoadTool") {
+                                Write-LoadToolBrowserResult -BrowserRecord $displayRecord -SearchStrings $Search
+                            }
                         }
                         catch {
                             Write-Verbose "Failed to display record: $($_.Exception.Message)"
@@ -18528,6 +19108,7 @@ Returns extension objects with webRequest permissions for further analysis.
         }
     }
 }
+
 
 Function Hunt-Files {
     <#
@@ -19944,11 +20525,10 @@ function Hunt-Tasks {
                 $sanitized = $sanitized -replace '["\r\n]', ' '
                 $sanitized = $sanitized -replace '\t', ' '
         
-                # Replace equals signs to prevent Excel formula injection
-                $sanitized = $sanitized -replace '=', '-'
-        
-                # Also sanitize other potential Excel formula starters for extra security
-                $sanitized = $sanitized -replace '^[\+\-@]', '_'
+                # Prevent Excel formula injection - prepend with single quote if starts with dangerous char
+                if ($sanitized -match '^[=+\-@]') {
+                    $sanitized = "'" + $sanitized
+                }
         
                 # Trim whitespace and limit length for Excel (32767 character limit per cell)
                 $sanitized = $sanitized.Trim()
@@ -19959,6 +20539,7 @@ function Hunt-Tasks {
                 return $sanitized
             }
             catch {
+                Write-Verbose "CSV sanitization error: $($_.Exception.Message)"
                 return ""
             }
         }
@@ -20038,158 +20619,38 @@ function Hunt-Tasks {
             return $FileName
         }
 
-        function Get-FileFromCommandLine {
-            param([String]$CommandLine)
-
-            if ([string]::IsNullOrWhiteSpace($CommandLine)) {
-                return $null
+        # Helper function to validate Windows paths
+        function Test-ValidWindowsPath {
+            param([string]$Path)
+            
+            if ([string]::IsNullOrWhiteSpace($Path)) {
+                return $false
             }
-
+            
             try {
-                # Expand environment variables
-                $expanded = [System.Environment]::ExpandEnvironmentVariables($CommandLine.Trim())
-    
-                # 1. COMPATTELRUNNER.EXE with -m: parameter - extract the executable, not the DLL
-                if ($expanded -match '(.*compattelrunner\.exe)\s+-m:') {
-                    return $matches[1]
+                # Check for valid path characters and structure
+                if ($Path.Length -gt 32767) {
+                    return $false
                 }
-    
-                # 2. CMD.EXE executing files - extract the target file
-                if ($expanded -match 'cmd\.exe.*?/[dc]\s+([A-Za-z]:\\[^"\s]+\.(cmd|bat|ps1|vbs|js))') {
-                    return $matches[1]
-                }
-                if ($expanded -match 'cmd\.exe.*?/[dc]\s+"([^"]+\.(cmd|bat|ps1|vbs|js))"') {
-                    return $matches[1]
-                }
-                if ($expanded -match 'cmd\.exe.*?/[dc]\s+([^"\s]+\.(cmd|bat|ps1|vbs|js))') {
-                    return $matches[1]
-                }
-    
-                # 3. POWERSHELL.EXE executing files - extract script files or executables
-                if ($expanded -match 'powershell\.exe.*?-[Ff]ile\s+"?([^"\s]+\.(ps1|bat|cmd|exe|vbs|js))"?') {
-                    return $matches[1]
-                }
-                if ($expanded -match 'powershell\.exe.*?"[^"]*([A-Za-z]:\\[^"]*\.(ps1|bat|cmd|exe|vbs|js|dll))[^"]*"') {
-                    return $matches[1]
-                }
-                if ($expanded -match 'powershell\.exe.*?&\s+([A-Za-z]:\\[^"\s]+\.(ps1|bat|cmd|exe|vbs|js))') {
-                    return $matches[1]
-                }
-                if ($expanded -match 'powershell\.exe.*?\.\s+([A-Za-z]:\\[^"\s]+\.(ps1|bat|cmd|exe|vbs|js))') {
-                    return $matches[1]
-                }
-    
-                # 4. NODE.EXE executing JavaScript files
-                if ($expanded -match 'node\.exe\s+"?([^"\s]+\.js)"?') {
-                    return $matches[1]
-                }
-    
-                # 5. PYTHON.EXE executing Python files
-                if ($expanded -match 'python\.exe\s+"?([^"\s]+\.py)"?') {
-                    return $matches[1]
-                }
-    
-                # 6. WSCRIPT.EXE / CSCRIPT.EXE executing scripts
-                if ($expanded -match '(?:wscript|cscript)\.exe\s+"?([^"\s]+\.(vbs|js|wsf))"?') {
-                    return $matches[1]
-                }
-    
-                # 7. MSHTA.EXE executing HTA files
-                if ($expanded -match 'mshta\.exe\s+"?([^"\s]+\.hta)"?') {
-                    return $matches[1]
-                }
-    
-                # 8. REGSVR32.EXE registering DLLs
-                if ($expanded -match 'regsvr32\.exe.*?\s+"?([^"\s]+\.dll)"?') {
-                    return $matches[1]
-                }
-    
-                # 9. RUNDLL32.EXE calling DLL functions - extract the DLL
-                if ($expanded -match 'rundll32\.exe\s+([A-Za-z]:\\[^,\s]+\.dll|[^,\s]+\.dll)') {
-                    $dll = $matches[1]
-                    # If relative path, try to resolve it
-                    if ($dll -notmatch '^[A-Za-z]:') {
-                        return Find-ExecutableInSystemPaths $dll
+                
+                # Basic Windows path validation
+                if ($Path -match '^[A-Za-z]:\\' -or $Path -match '^\\\\') {
+                    # Remove common invalid path characters
+                    if ($Path -match '[\<\>\|\?\*]') {
+                        return $false
                     }
-                    return $dll
+                    return $true
                 }
-    
-                # 10. MSIEXEC.EXE installing MSI files
-                if ($expanded -match 'msiexec\.exe.*?[/\-]i\s+"?([^"\s]+\.msi)"?') {
-                    return $matches[1]
+                
+                # Allow relative paths and filenames
+                if ($Path -match '\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf)$') {
+                    return $true
                 }
-    
-                # 11. SCHTASKS.EXE with /RU (run as) pointing to executables
-                if ($expanded -match 'schtasks\.exe.*?/TR\s+"?([^"\s]+\.(exe|bat|cmd|ps1))"?') {
-                    return $matches[1]
-                }
-    
-                # 12. NET.EXE or SC.EXE starting services - return the full path
-                if ($expanded -match '^(net\.exe|sc\.exe)\s+(?:start|stop|config)') {
-                    $utilityName = $matches[1]
-                    return Find-ExecutableInSystemPaths $utilityName
-                }
-    
-                # 13. Quoted paths - but exclude PowerShell script content
-                if ($expanded -match '"([^"]+)"' -and $matches[1] -notlike "& *" -and $matches[1] -notlike ".*-.*") {
-                    $path = $matches[1].Trim()
-                    # Clean trailing punctuation
-                    $path = $path -replace '[,;]+$', ''
-                    # Only return if it's a file path
-                    if ($path -match '\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf)$') {
-                        return $path
-                    }
-                }
-    
-                # 14. Simple drive paths with any extension
-                if ($expanded -match '^([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))(\s|$)') {
-                    $path = $matches[1].Trim()
-                    # Clean trailing punctuation
-                    $path = $path -replace '[,;]+$', ''
-                    return $path
-                }
-    
-                # 15. Drive paths with arguments - capture until first argument
-                if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+(-|/)') {
-                    return $matches[1].Trim()
-                }
-    
-                # 16. Drive paths with space + word arguments (non-path arguments)
-                if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+([a-zA-Z]+)' -and $matches[3] -notmatch '^[A-Za-z]:') {
-                    return $matches[1].Trim()
-                }
-    
-                # 17. UNC paths
-                if ($expanded -match '(\\\\[^\\]+\\[^\s"]+\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))') {
-                    return $matches[1].Trim()
-                }
-    
-                # 18. Simple executable names with arguments - handle cases like "BthUdTask.exe $(Arg0)"
-                if ($expanded -match '^([a-zA-Z][a-zA-Z0-9]*\.(exe|com|scr|dll))(\s|$)') {
-                    $file = $matches[1]
-                    return Find-ExecutableInSystemPaths $file
-                }
-    
-                # 19. Look for any executable file in command line arguments
-                if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))') {
-                    return $matches[1] -replace '[,;]+$', ''
-                }
-    
-                # 20. FINAL FALLBACK - if nothing else worked and we have a non-empty string, return it
-                if (![string]::IsNullOrWhiteSpace($expanded)) {
-                    return $expanded.Trim()
-                }
-    
-                return $null
-    
+                
+                return $false
             }
             catch {
-                Write-Verbose "Error parsing command line '$CommandLine': $($_.Exception.Message)"
-                # Even on error, try the fallback
-                if (![string]::IsNullOrWhiteSpace($CommandLine)) {
-                    return $CommandLine.Trim()
-                }
-                return $null
+                return $false
             }
         }
 
@@ -20200,33 +20661,77 @@ function Hunt-Tasks {
                 [string]$SearchPattern
             )
             
+            # Handle null or empty inputs
             if ([string]::IsNullOrWhiteSpace($Text) -or [string]::IsNullOrWhiteSpace($SearchPattern)) {
                 return $false
             }
             
             try {
-                return $Text -like $SearchPattern
+                # Ensure pattern has wildcards for flexible matching
+                $pattern = if ($SearchPattern -notlike '*`**' -and $SearchPattern -notlike '*`?*') {
+                    "*$SearchPattern*"
+                }
+                else {
+                    $SearchPattern
+                }
+                
+                return $Text -like $pattern
             }
             catch {
                 # Fallback to simple contains check if wildcard pattern fails
-                return $Text.ToLower().Contains($SearchPattern.ToLower())
+                try {
+                    return $Text.ToLower().Contains($SearchPattern.ToLower().Replace('*', '').Replace('?', ''))
+                }
+                catch {
+                    Write-Verbose "Search match failed for text '$Text' with pattern '$SearchPattern'"
+                    return $false
+                }
             }
         }
         
         # Helper function to calculate SHA256
         function Get-FileSHA256 {
             param([string]$FilePath)
+            
+            if ([string]::IsNullOrWhiteSpace($FilePath)) {
+                return 'N/A'
+            }
+            
             try {
                 if (Test-Path $FilePath -PathType Leaf -ErrorAction SilentlyContinue) {
-                    $hash = [System.Security.Cryptography.SHA256]::Create()
-                    $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
-                    $hashBytes = $hash.ComputeHash($fileBytes)
-                    $hash.Dispose()
-                    return [BitConverter]::ToString($hashBytes).Replace('-', '').ToLower()
+                    $fileInfo = Get-Item $FilePath -Force -ErrorAction Stop
+                    
+                    # Skip files larger than 500MB to prevent memory issues
+                    if ($fileInfo.Length -gt 524288000) {
+                        Write-Verbose "File too large for hash calculation: $FilePath ($([math]::Round($fileInfo.Length / 1MB, 2)) MB)"
+                        return 'File Too Large'
+                    }
+                    
+                    $hash = $null
+                    try {
+                        $hash = [System.Security.Cryptography.SHA256]::Create()
+                        $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
+                        $hashBytes = $hash.ComputeHash($fileBytes)
+                        return [BitConverter]::ToString($hashBytes).Replace('-', '').ToLower()
+                    }
+                    finally {
+                        if ($null -ne $hash) {
+                            $hash.Dispose()
+                        }
+                    }
                 }
                 return 'N/A'
             }
+            catch [System.UnauthorizedAccessException] {
+                Write-Verbose "Access denied for hash calculation: $FilePath"
+                return 'Access Denied'
+            }
+            catch [System.IO.IOException] {
+                Write-Verbose "File locked or IO error: $FilePath"
+                return 'File Locked'
+            }
             catch {
+                Write-Verbose "Hash calculation error for $FilePath - $($_.Exception.Message)"
                 return 'N/A'
             }
         }
@@ -20234,25 +20739,84 @@ function Hunt-Tasks {
         # Helper function to get file information
         function Get-FileDetails {
             param([string]$FilePath)
+            
+            if ([string]::IsNullOrWhiteSpace($FilePath)) {
+                return @{
+                    Path     = $FilePath
+                    Created  = 'N/A'
+                    Modified = 'N/A'
+                    Accessed = 'N/A'
+                    Size     = 'N/A'
+                    SHA256   = 'N/A'
+                    Exists   = $false
+                }
+            }
+            
+            # Check path length (Windows limit is 260 for most APIs, 32767 for Unicode)
+            if ($FilePath.Length -gt 32767) {
+                Write-Verbose "Path too long: $($FilePath.Length) characters"
+                return @{
+                    Path     = $FilePath.Substring(0, 200) + "...[TRUNCATED]"
+                    Created  = 'N/A'
+                    Modified = 'N/A'
+                    Accessed = 'N/A'
+                    Size     = 'N/A'
+                    SHA256   = 'Path Too Long'
+                    Exists   = $false
+                }
+            }
+            
             try {
                 if (Test-Path $FilePath -ErrorAction SilentlyContinue) {
-                    $file = Get-Item $FilePath -Force -ErrorAction SilentlyContinue
+                    $file = $null
+                    try {
+                        $file = Get-Item $FilePath -Force -ErrorAction Stop
+                    }
+                    catch [System.UnauthorizedAccessException] {
+                        Write-Verbose "Access denied: $FilePath"
+                        return @{
+                            Path     = $FilePath
+                            Created  = 'N/A'
+                            Modified = 'N/A'
+                            Accessed = 'N/A'
+                            Size     = 'N/A'
+                            SHA256   = 'Access Denied'
+                            Exists   = $true
+                        }
+                    }
+                    
                     if ($file) {
+                        $fileSize = 'N/A'
+                        $sha256Hash = 'N/A'
+                        
+                        if (-not $file.PSIsContainer) {
+                            try {
+                                $fileSize = [math]::Round($file.Length / 1MB, 2)
+                            }
+                            catch {
+                                $fileSize = 'N/A'
+                            }
+                            
+                            # Get hash (with built-in size and access checks)
+                            $sha256Hash = Get-FileSHA256 -FilePath $file.FullName
+                        }
+                        
                         return @{
                             Path     = $file.FullName
                             Created  = $file.CreationTime
                             Modified = $file.LastWriteTime
                             Accessed = $file.LastAccessTime
-                            Size     = if ($file.PSIsContainer) { 'N/A' } else { [math]::Round($file.Length / 1MB, 2) }
-                            SHA256   = if ($file.PSIsContainer) { 'N/A' } else { Get-FileSHA256 -FilePath $file.FullName }
+                            Size     = $fileSize
+                            SHA256   = $sha256Hash
                             Exists   = $true
                         }
                     }
                 }
+                
                 return @{
                     Path     = $FilePath
                     Created  = 'N/A'
-                    Modified = 'N/A' 
+                    Modified = 'N/A'
                     Accessed = 'N/A'
                     Size     = 'N/A'
                     SHA256   = 'N/A'
@@ -20260,11 +20824,12 @@ function Hunt-Tasks {
                 }
             }
             catch {
+                Write-Verbose "Error getting file details for '$FilePath': $($_.Exception.Message)"
                 return @{
                     Path     = $FilePath
                     Created  = 'N/A'
                     Modified = 'N/A'
-                    Accessed = 'N/A' 
+                    Accessed = 'N/A'
                     Size     = 'N/A'
                     SHA256   = 'N/A'
                     Exists   = $false
@@ -20373,6 +20938,12 @@ function Hunt-Tasks {
                     }
                     catch {
                         # Continue without task info if it fails
+                    }
+                    
+                    # Validate task has actions
+                    if (-not $task.Actions -or $task.Actions.Count -eq 0) {
+                        Write-Verbose "Task '$($task.TaskName)' has no actions"
+                        continue
                     }
                     
                     foreach ($action in $task.Actions) {
@@ -20713,16 +21284,16 @@ function Hunt-Tasks {
                                 State              = Sanitize-CSVValue $_.State
                                 Author             = Sanitize-CSVValue $_.Author
                                 Description        = Sanitize-CSVValue $_.Description
-                                LastRunTime        = if ($_.LastRunTime) { $_.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
-                                NextRunTime        = if ($_.NextRunTime) { $_.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                LastRunTime        = if ($_.LastRunTime -is [DateTime]) { $_.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                NextRunTime        = if ($_.NextRunTime -is [DateTime]) { $_.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
                                 TaskFilePath       = Sanitize-CSVValue $_.TaskFilePath
                                 TaskFileExists     = $_.TaskFileExists
                                 TaskFileSHA256     = Sanitize-CSVValue $_.TaskFileSHA256
-                                TaskFileModified   = if ($_.TaskFileModified -ne 'N/A') { $_.TaskFileModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
+                                TaskFileModified   = if ($_.TaskFileModified -is [DateTime]) { $_.TaskFileModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
                                 ExecutablePath     = Sanitize-CSVValue $_.ExecutablePath
                                 ExecutableExists   = $_.ExecutableExists
                                 ExecutableSHA256   = Sanitize-CSVValue $_.ExecutableSHA256
-                                ExecutableModified = if ($_.ExecutableModified -ne 'N/A') { $_.ExecutableModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
+                                ExecutableModified = if ($_.ExecutableModified -is [DateTime]) { $_.ExecutableModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
                                 Arguments          = Sanitize-CSVValue $_.Arguments
                                 ScriptFilePath     = Sanitize-CSVValue $_.ScriptFilePath
                                 ScriptFileExists   = $_.ScriptFileExists
@@ -20872,7 +21443,6 @@ Searches all hives including unloaded user profiles for "evil.exe".
     # Initialize variables
     $hostname = $env:COMPUTERNAME
     $results = @()
-    $script:mountedHives = @()
 
     # Known Run keys from Hunt-Persistence
     $runKeyPaths = @(
@@ -20893,19 +21463,66 @@ Searches all hives including unloaded user profiles for "evil.exe".
 
     function ConvertTo-SafeCSV {
         param($Results)
-    
-        foreach ($result in $Results) {
-            # Sanitize each property to be Excel-safe
-            $result.KeyPath = Format-ExcelSafeString $result.KeyPath
-            $result.ValueName = Format-ExcelSafeString $result.ValueName
-            $result.ValueData = Format-ExcelSafeString $result.ValueData
-            $result.SearchTerm = Format-ExcelSafeString $result.SearchTerm
-            $result.MatchLocation = Format-ExcelSafeString $result.MatchLocation
-            $result.Hostname = Format-ExcelSafeString $result.Hostname
-            $result.Hive = Format-ExcelSafeString $result.Hive
-            $result.ValueType = Format-ExcelSafeString $result.ValueType
+        
+        if (-not $Results -or $Results.Count -eq 0) {
+            return @()
         }
-        return $Results
+    
+        try {
+            foreach ($result in $Results) {
+                if (-not $result) { continue }
+                
+                # Sanitize each property to be Excel-safe with null checks
+                if ($result.PSObject.Properties.Name -contains 'KeyPath') {
+                    $result.KeyPath = Format-ExcelSafeString $result.KeyPath
+                }
+                if ($result.PSObject.Properties.Name -contains 'ValueName') {
+                    $result.ValueName = Format-ExcelSafeString $result.ValueName
+                }
+                if ($result.PSObject.Properties.Name -contains 'ValueData') {
+                    # Handle value data specially - could be complex types
+                    try {
+                        if ($null -ne $result.ValueData) {
+                            if ($result.ValueData -is [string]) {
+                                $result.ValueData = Format-ExcelSafeString $result.ValueData
+                            }
+                            elseif ($result.ValueData -is [array]) {
+                                $result.ValueData = Format-ExcelSafeString ($result.ValueData -join '; ')
+                            }
+                            else {
+                                $result.ValueData = Format-ExcelSafeString $result.ValueData.ToString()
+                            }
+                        }
+                        else {
+                            $result.ValueData = ""
+                        }
+                    }
+                    catch {
+                        $result.ValueData = "[Data conversion error]"
+                    }
+                }
+                if ($result.PSObject.Properties.Name -contains 'SearchTerm') {
+                    $result.SearchTerm = Format-ExcelSafeString $result.SearchTerm
+                }
+                if ($result.PSObject.Properties.Name -contains 'MatchLocation') {
+                    $result.MatchLocation = Format-ExcelSafeString $result.MatchLocation
+                }
+                if ($result.PSObject.Properties.Name -contains 'Hostname') {
+                    $result.Hostname = Format-ExcelSafeString $result.Hostname
+                }
+                if ($result.PSObject.Properties.Name -contains 'Hive') {
+                    $result.Hive = Format-ExcelSafeString $result.Hive
+                }
+                if ($result.PSObject.Properties.Name -contains 'ValueType') {
+                    $result.ValueType = Format-ExcelSafeString $result.ValueType
+                }
+            }
+            return $Results
+        }
+        catch {
+            Write-Warning "Error sanitizing CSV data: $($_.Exception.Message)"
+            return $Results
+        }
     }
 
     function Export-ResultsToCSV {
@@ -20957,135 +21574,38 @@ Searches all hives including unloaded user profiles for "evil.exe".
     function Format-ExcelSafeString {
         param([string]$InputString)
     
-        if ([string]::IsNullOrEmpty($InputString)) {
+        if ([string]::IsNullOrWhiteSpace($InputString)) {
             return ""
         }
-    
-        # Remove or escape dangerous characters
-        $safeString = $InputString -replace '^=', "'=" -replace '^@', "'@" -replace '^\+', "'+" -replace '^-', "'-"
-    
-        # Remove control characters and non-printable characters
-        $safeString = $safeString -replace '[\x00-\x1F\x7F]', ''
-    
-        # Escape double quotes by doubling them
-        $safeString = $safeString -replace '"', '""'
-    
-        # Truncate if too long for Excel (32,767 character limit per cell)
-        if ($safeString.Length -gt 32000) {
-            $safeString = $safeString.Substring(0, 32000) + "...[TRUNCATED]"
-        }
-    
-        return $safeString
-    }
-
-    function Get-AllRegistryHives {
-        [CmdletBinding()]
-        param([Switch]$Unloaded)
-    
-        $hiveList = [Collections.ArrayList]::new()
-    
-        if ($Unloaded) {
-            if (-not $isAdmin) {
-                Write-Warning "Administrator privileges required for -LoadHives. Continuing with loaded hives only."
-                $Unloaded = $false
-            }
-        }
-    
-        # Add main hives based on parent $Hive parameter
-        if ($script:HiveFilter -eq 'All' -or $script:HiveFilter -eq 'HKLM') {
-            $hklm = Get-Item Registry::HKEY_LOCAL_MACHINE -ErrorAction SilentlyContinue
-            if ($hklm) { $null = $hiveList.Add($hklm.PSPath) }
-        }
-    
-        if ($script:HiveFilter -eq 'All' -or $script:HiveFilter -eq 'HKCU') {
-            $hkcu = Get-Item Registry::HKEY_CURRENT_USER -ErrorAction SilentlyContinue
-            if ($hkcu) { $null = $hiveList.Add($hkcu.PSPath) }
-        }
-    
-        if ($script:HiveFilter -eq 'All' -or $script:HiveFilter -eq 'HKCR') {
-            $hkcr = Get-Item Registry::HKEY_CLASSES_ROOT -ErrorAction SilentlyContinue
-            if ($hkcr) { $null = $hiveList.Add($hkcr.PSPath) }
-        }
-    
-        if ($script:HiveFilter -eq 'All' -or $script:HiveFilter -eq 'HKU') {
-            $loadedUserHives = Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue
-            foreach ($hiveItem in $loadedUserHives) {
-                $null = $hiveList.Add($hiveItem.PSPath)
-            }
-        }
-    
-        if ($script:HiveFilter -eq 'All' -or $script:HiveFilter -eq 'HKCC') {
-            $hkcc = Get-Item Registry::HKEY_CURRENT_CONFIG -ErrorAction SilentlyContinue
-            if ($hkcc) { $null = $hiveList.Add($hkcc.PSPath) }
-        }
-    
-        # Load unloaded user profiles if requested
-        if ($Unloaded -and ($script:HiveFilter -eq 'All' -or $script:HiveFilter -eq 'HKU')) {
-            if (-not $Quiet) {
-                Write-Host "[INFO] Loading unloaded user registry hives..." -ForegroundColor Yellow
-            }
         
-            try {
-                $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
-                $profiles = Get-ChildItem $profileListPath -ErrorAction Stop
+        try {
+            # Convert to string if needed (handles non-string types)
+            $stringValue = $InputString.ToString()
             
-                foreach ($profile in $profiles) {
-                    $sid = Split-Path $profile.Name -Leaf
-                
-                    $alreadyLoaded = $loadedUserHives | Where-Object { $_.Name -like "*$sid*" }
-                    if ($alreadyLoaded) { continue }
-                
-                    $profileData = Get-ItemProperty $profile.PSPath -ErrorAction SilentlyContinue
-                    if ($null -eq $profileData.ProfileImagePath) { continue }
-                
-                    $ntUserPath = Join-Path $profileData.ProfileImagePath "NTUSER.DAT"
-                
-                    if (Test-Path $ntUserPath -ErrorAction SilentlyContinue) {
-                        $mountPoint = "TEMP_HUNT_REG_$($sid.Replace('-','_'))"
-                    
-                        try {
-                            $result = & reg.exe load "HKLM\$mountPoint" $ntUserPath 2>$null
-                            if ($LASTEXITCODE -eq 0) {
-                                $mountedHivePath = "Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\$mountPoint"
-                                $null = $hiveList.Add($mountedHivePath)
-                                $script:mountedHives += $mountPoint
-                                Write-Verbose "Mounted unloaded profile: $sid"
-                            }
-                        }
-                        catch {
-                            Write-Verbose "Error mounting profile $sid : $($_.Exception.Message)"
-                        }
-                    }
-                }
+            # Prevent Excel formula injection - prepend with single quote if starts with dangerous char
+            if ($stringValue -match '^[=@+\-]') {
+                $stringValue = "'" + $stringValue
             }
-            catch {
-                Write-Warning "Failed to enumerate user profiles: $($_.Exception.Message)"
+            
+            # Remove control characters and non-printable characters
+            $safeString = $stringValue -replace '[\x00-\x1F\x7F]', ''
+            
+            # Escape double quotes by doubling them (CSV standard)
+            $safeString = $safeString -replace '"', '""'
+            
+            # Truncate if too long for Excel (32,767 character limit per cell)
+            if ($safeString.Length -gt 32000) {
+                $safeString = $safeString.Substring(0, 32000) + "...[TRUNCATED]"
             }
+            
+            return $safeString
         }
-    
-        return $hiveList
+        catch {
+            Write-Verbose "Error sanitizing string: $($_.Exception.Message)"
+            return ""
+        }
     }
 
-    function Dismount-TemporaryHives {
-        if ($script:mountedHives -and $script:mountedHives.Count -gt 0) {
-            if (-not $Quiet) {
-                Write-Host "[CLEANUP] Dismounting temporary registry hives..." -ForegroundColor Yellow
-            }
-            
-            foreach ($mountPoint in $script:mountedHives) {
-                try {
-                    $result = & reg.exe unload "HKLM\$mountPoint" 2>$null
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Verbose "Successfully dismounted: $mountPoint"
-                    }
-                }
-                catch {
-                    Write-Warning "Error dismounting $mountPoint : $($_.Exception.Message)"
-                }
-            }
-            $script:mountedHives = @()
-        }
-    }
 
     function New-RegistryResult {
         param(
@@ -21189,18 +21709,26 @@ Searches all hives including unloaded user profiles for "evil.exe".
                                     # Try to determine value type
                                     try {
                                         $regValue = Get-ItemProperty -Path $key.PSPath -Name $valueName -ErrorAction SilentlyContinue
-                                        if ($regValue) {
-                                            $valueType = switch ($regValue.($valueName).GetType().Name) {
-                                                'String' { 'String' }
-                                                'String[]' { 'MultiString' }
-                                                'Int32' { 'DWord' }
-                                                'Int64' { 'QWord' }
-                                                'Byte[]' { 'Binary' }
-                                                default { 'String' }
+                                        if ($regValue -and $null -ne $regValue.($valueName)) {
+                                            try {
+                                                $typeName = $regValue.($valueName).GetType().Name
+                                                $valueType = switch ($typeName) {
+                                                    'String' { 'String' }
+                                                    'String[]' { 'MultiString' }
+                                                    'Int32' { 'DWord' }
+                                                    'Int64' { 'QWord' }
+                                                    'Byte[]' { 'Binary' }
+                                                    default { $typeName }
+                                                }
+                                            }
+                                            catch {
+                                                $valueType = "Unknown"
                                             }
                                         }
                                     }
-                                    catch { }
+                                    catch {
+                                        Write-Verbose "Error determining value type for $valueName : $($_.Exception.Message)"
+                                    }
                             
                                     # Filter by value type if specified
                                     $typeMatch = $false
@@ -21224,12 +21752,38 @@ Searches all hives including unloaded user profiles for "evil.exe".
                                         }
                                 
                                         # Search in value data
-                                        if ($valueData) {
-                                            $dataString = $valueData.ToString()
-                                            foreach ($searchTerm in $SearchTerms) {
-                                                if ($dataString -like "*$searchTerm*") {
-                                                    $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -ValueName $valueName -ValueType $valueType -ValueData $valueData -SearchTerm $searchTerm -MatchLocation "Value Data"
+                                        if ($null -ne $valueData) {
+                                            try {
+                                                $dataString = $null
+                                                
+                                                # Handle different data types safely
+                                                if ($valueData -is [string]) {
+                                                    $dataString = $valueData
                                                 }
+                                                elseif ($valueData -is [array]) {
+                                                    # For arrays (like MultiString), join elements
+                                                    $dataString = $valueData -join '; '
+                                                }
+                                                elseif ($valueData -is [byte[]]) {
+                                                    # For binary data, convert to hex string (limited to first 1000 bytes)
+                                                    $bytesToConvert = if ($valueData.Length -gt 1000) { $valueData[0..999] } else { $valueData }
+                                                    $dataString = ($bytesToConvert | ForEach-Object { $_.ToString("X2") }) -join ''
+                                                }
+                                                else {
+                                                    # Fallback for other types
+                                                    $dataString = $valueData.ToString()
+                                                }
+                                                
+                                                if (![string]::IsNullOrWhiteSpace($dataString)) {
+                                                    foreach ($searchTerm in $SearchTerms) {
+                                                        if ($dataString -like "*$searchTerm*") {
+                                                            $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -ValueName $valueName -ValueType $valueType -ValueData $valueData -SearchTerm $searchTerm -MatchLocation "Value Data"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            catch {
+                                                Write-Verbose "Error searching value data for $valueName : $($_.Exception.Message)"
                                             }
                                         }
                                     }
@@ -21256,7 +21810,6 @@ Searches all hives including unloaded user profiles for "evil.exe".
         $runResults = @()
     
         try {
-            $systemAndUsersHives = Get-AllRegistryHives -Unloaded:$LoadHives
     
             if (-not $Quiet) {
                 Write-Progress -Activity "Retrieving Autorun Keys" -Status "Processing registry hives" -PercentComplete 0
@@ -21332,13 +21885,20 @@ Searches all hives including unloaded user profiles for "evil.exe".
     function Write-ColoredRegistryResult {
         param($RegistryResult)
         
+        if (-not $RegistryResult) { return }
+        
         Write-Host ""
         Write-Host "----------------------------------------" -ForegroundColor Gray     
-        Write-Host "Hive             : " -NoNewline -ForegroundColor Yellow
-        Write-Host $RegistryResult.Hive -ForegroundColor White
         
-        Write-Host "Key Path         : " -NoNewline -ForegroundColor Yellow
-        Write-Host $RegistryResult.KeyPath -ForegroundColor Cyan
+        if ($RegistryResult.Hive) {
+            Write-Host "Hive             : " -NoNewline -ForegroundColor Yellow
+            Write-Host $RegistryResult.Hive -ForegroundColor White
+        }
+        
+        if ($RegistryResult.KeyPath) {
+            Write-Host "Key Path         : " -NoNewline -ForegroundColor Yellow
+            Write-Host $RegistryResult.KeyPath -ForegroundColor Cyan
+        }
         
         if ($RegistryResult.ValueName) {
             Write-Host "Value Name       : " -NoNewline -ForegroundColor Yellow
@@ -21349,22 +21909,86 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 Write-Host $RegistryResult.ValueType -ForegroundColor White
             }
             
-            if ($RegistryResult.ValueData) {
+            if ($null -ne $RegistryResult.ValueData) {
                 Write-Host "Value Data       : " -NoNewline -ForegroundColor Yellow
-                Write-Host $RegistryResult.ValueData -ForegroundColor Red
+                
+                try {
+                    # Format value data based on type
+                    if ($RegistryResult.ValueData -is [string]) {
+                        $displayData = $RegistryResult.ValueData
+                    }
+                    elseif ($RegistryResult.ValueData -is [array]) {
+                        $displayData = $RegistryResult.ValueData -join '; '
+                    }
+                    elseif ($RegistryResult.ValueData -is [byte[]]) {
+                        # Show first 32 bytes of binary data as hex
+                        $bytesToShow = if ($RegistryResult.ValueData.Length -gt 32) { 
+                            $RegistryResult.ValueData[0..31] 
+                        }
+                        else { 
+                            $RegistryResult.ValueData 
+                        }
+                        $displayData = ($bytesToShow | ForEach-Object { $_.ToString("X2") }) -join ' '
+                        if ($RegistryResult.ValueData.Length -gt 32) {
+                            $displayData += "... ($($RegistryResult.ValueData.Length) bytes total)"
+                        }
+                    }
+                    else {
+                        $displayData = $RegistryResult.ValueData.ToString()
+                    }
+                    
+                    # Truncate if too long for display
+                    if ($displayData.Length -gt 500) {
+                        $displayData = $displayData.Substring(0, 500) + "...[TRUNCATED]"
+                    }
+                    
+                    Write-Host $displayData -ForegroundColor Red
+                }
+                catch {
+                    Write-Host "[Error displaying data]" -ForegroundColor Red
+                }
             }
         }
         
-        Write-Host "Search Term      : " -NoNewline -ForegroundColor Yellow
-        Write-Host $RegistryResult.SearchTerm -ForegroundColor DarkGray
+        if ($RegistryResult.SearchTerm) {
+            Write-Host "Search Term      : " -NoNewline -ForegroundColor Yellow
+            Write-Host $RegistryResult.SearchTerm -ForegroundColor DarkGray
+        }
         
-        Write-Host "Match Location   : " -NoNewline -ForegroundColor Yellow
-        Write-Host $RegistryResult.MatchLocation -ForegroundColor DarkGray
+        if ($RegistryResult.MatchLocation) {
+            Write-Host "Match Location   : " -NoNewline -ForegroundColor Yellow
+            Write-Host $RegistryResult.MatchLocation -ForegroundColor DarkGray
+        }
 
-        Write-Host "Hostname         : " -NoNewline -ForegroundColor Yellow
-        Write-Host $RegistryResult.Hostname -ForegroundColor DarkGray
+        if ($RegistryResult.Hostname) {
+            Write-Host "Hostname         : " -NoNewline -ForegroundColor Yellow
+            Write-Host $RegistryResult.Hostname -ForegroundColor DarkGray
+        }
     }
 
+    # Get registry hives using shared helper
+    try {
+        if (Get-Command Get-RegistryHivesForAnalysis -ErrorAction SilentlyContinue) {
+            $systemAndUsersHives = Get-RegistryHivesForAnalysis -LoadUnloadedHives:$LoadHives -HiveFilter:$script:HiveFilter -Quiet:$Quiet
+        }
+        else {
+            Write-Error "Required helper function 'Get-RegistryHivesForAnalysis' not found. Ensure ThreatHunter module is properly loaded."
+            if ($PassThru) { return @() }
+            return
+        }
+        
+        if (-not $systemAndUsersHives -or $systemAndUsersHives.Count -eq 0) {
+            Write-Error "No registry hives available for analysis"
+            if ($PassThru) { return @() }
+            return
+        }
+    }
+    catch {
+        Write-Error "Failed to load registry hives: $($_.Exception.Message)"
+        if ($PassThru) { return @() }
+        return
+    }
+    
     # Main execution logic
     try {
         Write-Verbose "Starting Hunt-Registry execution..."
@@ -21389,8 +22013,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 Write-Host "[INFO] Search Type: $Type, Hive: $script:HiveFilter" -ForegroundColor Cyan
             }
             
-            # Get registry hives
-            $systemAndUsersHives = Get-AllRegistryHives -Unloaded:$LoadHives
+            # Registry hives already loaded by Get-RegistryHivesForAnalysis
             
             # Search each hive
             foreach ($registryHive in $systemAndUsersHives) {
@@ -21479,7 +22102,17 @@ Searches all hives including unloaded user profiles for "evil.exe".
     finally {
         # Cleanup loaded hives
         if ($LoadHives) {
-            Dismount-TemporaryHives
+            try {
+                if (Get-Command Dismount-AllRegistryHives -ErrorAction SilentlyContinue) {
+                    Dismount-AllRegistryHives -Quiet:$Quiet
+                }
+                else {
+                    Write-Verbose "Dismount-AllRegistryHives function not available for cleanup"
+                }
+            }
+            catch {
+                Write-Warning "Failed to dismount registry hives: $($_.Exception.Message)"
+            }
         }
     }
 }
@@ -21564,125 +22197,43 @@ function Hunt-Services {
         [string]$OutputCSV = ""
     )
 
-    # Get-FileFromCommandLine function embedded
-    function Get-FileFromCommandLine {
-        param([String]$CommandLine)
-
-        if ([string]::IsNullOrWhiteSpace($CommandLine)) {
-            return $null
-        }
-
-        try {
-            $expanded = [System.Environment]::ExpandEnvironmentVariables($CommandLine.Trim())
-        
-            # COMPATTELRUNNER.EXE with -m: parameter
-            if ($expanded -match '(.*compattelrunner\.exe)\s+-m:') {
-                return $matches[1]
-            }
-        
-            # CMD.EXE executing files
-            if ($expanded -match 'cmd\.exe.*?/[dc]\s+"([^"]+\.(cmd|bat|ps1|vbs|js))"') {
-                return $matches[1]
-            }
-            if ($expanded -match 'cmd\.exe.*?/[dc]\s+([^"\s]+\.(cmd|bat|ps1|vbs|js))') {
-                return $matches[1]
-            }
-        
-            # POWERSHELL.EXE executing files
-            if ($expanded -match 'powershell\.exe.*?-[Ff]ile\s+"?([^"\s]+\.(ps1|bat|cmd|exe|vbs|js))"?') {
-                return $matches[1]
-            }
-            if ($expanded -match 'powershell\.exe.*?"[^"]*([A-Za-z]:\\[^"]*\.(ps1|bat|cmd|exe|vbs|js|dll))[^"]*"') {
-                return $matches[1]
-            }
-        
-            # NODE.EXE, PYTHON.EXE, WSCRIPT/CSCRIPT.EXE, MSHTA.EXE
-            if ($expanded -match 'node\.exe\s+"?([^"\s]+\.js)"?') {
-                return $matches[1]
-            }
-            if ($expanded -match 'python\.exe\s+"?([^"\s]+\.py)"?') {
-                return $matches[1]
-            }
-            if ($expanded -match '(?:wscript|cscript)\.exe\s+"?([^"\s]+\.(vbs|js|wsf))"?') {
-                return $matches[1]
-            }
-            if ($expanded -match 'mshta\.exe\s+"?([^"\s]+\.hta)"?') {
-                return $matches[1]
-            }
-        
-            # REGSVR32.EXE and RUNDLL32.EXE
-            if ($expanded -match 'regsvr32\.exe.*?\s+"?([^"\s]+\.dll)"?') {
-                return $matches[1]
-            }
-            if ($expanded -match 'rundll32\.exe\s+([^,\s]+\.dll)') {
-                return $matches[1]
-            }
-        
-            # MSIEXEC.EXE and SCHTASKS.EXE
-            if ($expanded -match 'msiexec\.exe.*?[/\-]i\s+"?([^"\s]+\.msi)"?') {
-                return $matches[1]
-            }
-            if ($expanded -match 'schtasks\.exe.*?/TR\s+"?([^"\s]+\.(exe|bat|cmd|ps1))"?') {
-                return $matches[1]
-            }
-        
-            # Quoted paths
-            if ($expanded -match '"([^"]+\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))"') {
-                return $matches[1]
-            }
-        
-            # Simple drive paths
-            if ($expanded -match '^([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))(\s|$)') {
-                return $matches[1].Trim() -replace '[,;]+$', ''
-            }
-        
-            # Drive paths with arguments
-            if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))\s+[-/]') {
-                return $matches[1].Trim()
-            }
-        
-            # UNC paths
-            if ($expanded -match '(\\\\[^\\]+\\[^\s"]+\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr))') {
-                return $matches[1].Trim()
-            }
-        
-            # Simple executable names
-            if ($expanded -match '^([a-zA-Z][a-zA-Z0-9]*\.(exe|com|scr|dll))(\s|$)') {
-                return $matches[1]
-            }
-        
-            # Any executable file in command line
-            if ($expanded -match '([A-Za-z]:[^"]*\.(exe|dll|bat|cmd|ps1|vbs|js|msi|com|scr|lnk|cpl|hta|wsf))') {
-                return $matches[1] -replace '[,;]+$', ''
-            }
-        
-            return $expanded.Trim()
-        }
-        catch {
-            return $CommandLine.Trim()
-        }
-    }
+    
 
     # Get the true service executable (including DLLs for svchost services)
     function Get-ServiceExecutable {
         param([string]$ServiceName, [string]$CommandLine)
+        
+        if ([string]::IsNullOrWhiteSpace($ServiceName) -or [string]::IsNullOrWhiteSpace($CommandLine)) {
+            return $CommandLine
+        }
         
         try {
             $cmdLineExe = Get-FileFromCommandLine -CommandLine $CommandLine
             
             if ($cmdLineExe -and $cmdLineExe -match 'svchost\.exe$') {
                 try {
+                    # Sanitize service name for registry path (remove potentially dangerous chars)
+                    $sanitizedServiceName = $ServiceName -replace '[\\\/\:\*\?\"\<\>\|]', '_'
+                    
                     # Method 1: Check Parameters subkey for ServiceDll
-                    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters"
+                    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$sanitizedServiceName\Parameters"
                     if (Test-Path $regPath -ErrorAction SilentlyContinue) {
-                        $serviceDll = (Get-ItemProperty $regPath -Name ServiceDll -ErrorAction SilentlyContinue).ServiceDll
-                        if ($serviceDll) {
-                            return [Environment]::ExpandEnvironmentVariables($serviceDll)
+                        try {
+                            $serviceDll = (Get-ItemProperty $regPath -Name ServiceDll -ErrorAction SilentlyContinue).ServiceDll
+                            if (![string]::IsNullOrWhiteSpace($serviceDll)) {
+                                $expandedPath = [Environment]::ExpandEnvironmentVariables($serviceDll)
+                                if (![string]::IsNullOrWhiteSpace($expandedPath)) {
+                                    return $expandedPath
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Error reading ServiceDll from Parameters: $($_.Exception.Message)"
                         }
                     }
                     
                     # Method 2: Check main service key for ServiceDll
-                    $regPath2 = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+                    $regPath2 = "HKLM:\SYSTEM\CurrentControlSet\Services\$sanitizedServiceName"
                     if (Test-Path $regPath2 -ErrorAction SilentlyContinue) {
                         $serviceReg = Get-ItemProperty $regPath2 -ErrorAction SilentlyContinue
                         
@@ -21728,46 +22279,120 @@ function Hunt-Services {
     # Get SHA256 hash
     function Get-FileSHA256 {
         param([string]$FilePath)
+        
+        if ([string]::IsNullOrWhiteSpace($FilePath)) {
+            return $null
+        }
+        
         try {
             if (Test-Path $FilePath -PathType Leaf -ErrorAction SilentlyContinue) {
-                $hash = Get-FileHash -Path $FilePath -Algorithm SHA256 -ErrorAction SilentlyContinue
-                return $hash.Hash.ToLower()
+                $fileInfo = Get-Item $FilePath -Force -ErrorAction Stop
+                
+                # Skip files larger than 500MB to prevent memory issues
+                if ($fileInfo.Length -gt 524288000) {
+                    Write-Verbose "File too large for hash calculation: $FilePath ($([math]::Round($fileInfo.Length / 1MB, 2)) MB)"
+                    return "File Too Large"
+                }
+                
+                $hash = Get-FileHash -Path $FilePath -Algorithm SHA256 -ErrorAction Stop
+                if ($hash -and $hash.Hash) {
+                    return $hash.Hash.ToLower()
+                }
             }
+            return $null
         }
-        catch { }
-        return $null
+        catch [System.UnauthorizedAccessException] {
+            Write-Verbose "Access denied for hash calculation: $FilePath"
+            return "Access Denied"
+        }
+        catch [System.IO.IOException] {
+            Write-Verbose "File locked or IO error: $FilePath"
+            return "File Locked"
+        }
+        catch {
+            Write-Verbose "Hash calculation error for $FilePath`: $($_.Exception.Message)"
+            return $null
+        }
     }
 
     # Test search matches - optimized with early return
     function Test-ServiceMatches {
         param($Service, $ServiceDetails, $Search)
         
-        if ($Search.Count -eq 0) { return $true }
-        
-        $searchFields = @($Service.Name, $Service.DisplayName, $Service.Status, $Service.StartType)
-        if ($ServiceDetails) {
-            $searchFields += @($ServiceDetails.StartName, $ServiceDetails.Description, $ServiceDetails.PathName)
+        if (-not $Search -or $Search.Count -eq 0) { 
+            return $true 
         }
         
+        if (-not $Service) {
+            return $false
+        }
+        
+        # Build search fields array with null checks
+        $searchFields = @()
+        if ($Service.Name) { $searchFields += $Service.Name }
+        if ($Service.DisplayName) { $searchFields += $Service.DisplayName }
+        if ($Service.Status) { $searchFields += $Service.Status.ToString() }
+        if ($Service.StartType) { $searchFields += $Service.StartType.ToString() }
+        
+        if ($ServiceDetails) {
+            if ($ServiceDetails.StartName) { $searchFields += $ServiceDetails.StartName }
+            if ($ServiceDetails.Description) { $searchFields += $ServiceDetails.Description }
+            if ($ServiceDetails.PathName) { $searchFields += $ServiceDetails.PathName }
+        }
+        
+        # Search logic - any match in any field returns true
         foreach ($searchString in $Search) {
+            if ([string]::IsNullOrWhiteSpace($searchString)) {
+                continue
+            }
+            
             foreach ($field in $searchFields) {
-                if ($field -and $field -like "*$searchString*") {
-                    return $true
+                try {
+                    if ($field -like "*$searchString*") {
+                        return $true
+                    }
+                }
+                catch {
+                    Write-Verbose "Search match error: $($_.Exception.Message)"
+                    continue
                 }
             }
         }
+        
         return $false
     }
 
     # Sanitize CSV values
     function Sanitize-CSVValue {
         param([string]$Value)
-        if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
-        try {
-            $sanitized = $Value -replace '[\x00-\x1F\x7F]', ' ' -replace '["\r\n\t]', ' ' -replace '^[\+\-@=]', '_'
-            return $sanitized.Trim().Substring(0, [Math]::Min($sanitized.Length, 32000))
+        
+        if ([string]::IsNullOrWhiteSpace($Value)) { 
+            return "" 
         }
-        catch { return "" }
+        
+        try {
+            # Remove control characters and problematic chars
+            $sanitized = $Value -replace '[\x00-\x1F\x7F]', ' '
+            $sanitized = $sanitized -replace '["\r\n\t]', ' '
+            
+            # Prevent Excel formula injection - prepend with single quote if starts with dangerous char
+            if ($sanitized -match '^[=+\-@]') {
+                $sanitized = "'" + $sanitized
+            }
+            
+            # Trim and limit length
+            $sanitized = $sanitized.Trim()
+            
+            if ($sanitized.Length -gt 32000) {
+                $sanitized = $sanitized.Substring(0, 32000) + "...[TRUNCATED]"
+            }
+            
+            return $sanitized
+        }
+        catch {
+            Write-Verbose "CSV sanitization error: $($_.Exception.Message)"
+            return ""
+        }
     }
 
     # Get CSV filename
@@ -22137,6 +22762,15 @@ function Hunt-VirusTotal {
             if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 404) {
                 return $null
             }
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+                Write-Error "Authentication failed. Check your API key."
+                return $null
+            }
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 403) {
+                Write-Error "Access forbidden. Your API key may not have sufficient permissions."
+                return $null
+            }
+            Write-Verbose "VT Query Error: $($_.Exception.Message)"
             throw $_
         }
     }
@@ -22210,27 +22844,44 @@ function Hunt-VirusTotal {
                 if ($response.data.attributes.status -eq "completed") {
                     if (-not $Quiet) { Write-Host "[+] Analysis completed!" -ForegroundColor Green }
                 
-                    if ($response.meta.file_info.sha256) {
+                    if ($response.meta -and $response.meta.file_info -and $response.meta.file_info.sha256) {
                         $fileHash = $response.meta.file_info.sha256
                         if (-not $Quiet) { Write-Host "[+] Final file hash: $fileHash" -ForegroundColor Cyan }
                     
-                        $vtReport = Invoke-VTFileQuery -FileHash $fileHash -VTApiKey $VTApiKey
-                        if ($vtReport) {
-                            Write-Progress -Activity "VirusTotal Analysis" -Status "Processing final results..." -PercentComplete 90
-                            $result = Convert-VTResponse -VTReport $vtReport -Hash $fileHash -HashType "SHA256"
-    
-                            if (-not $Quiet) {
-                                Display-VTReport -Result $result -More:$More
+                        try {
+                            $vtReport = Invoke-VTFileQuery -FileHash $fileHash -VTApiKey $VTApiKey
+                            if ($vtReport) {
+                                Write-Progress -Activity "VirusTotal Analysis" -Status "Processing final results..." -PercentComplete 90
+                                $result = Convert-VTResponse -VTReport $vtReport -Hash $fileHash -HashType "SHA256"
+        
+                                if ($result) {
+                                    if (-not $Quiet) {
+                                        Display-VTReport -Result $result -More:$More
+                                    }
+        
+                                    if ($OutputCSV) {
+                                        Export-VTResultsToCSV -Results @($result) -OutputPath $OutputCSV
+                                    }
+        
+                                    Write-Progress -Activity "VirusTotal Analysis" -Completed
+                                    return $result
+                                }
+                                else {
+                                    if (-not $Quiet) { Write-Host "[!] Failed to process analysis results" -ForegroundColor Red }
+                                }
                             }
-    
-                            if ($OutputCSV) {
-                                Export-VTResultsToCSV -Results @($result) -OutputPath $OutputCSV
+                            else {
+                                if (-not $Quiet) { Write-Host "[!] Failed to retrieve final report" -ForegroundColor Red }
                             }
-    
-                            Write-Progress -Activity "VirusTotal Analysis" -Completed
-                            return $result
+                        }
+                        catch {
+                            if (-not $Quiet) { Write-Host "[!] Error retrieving final report: $($_.Exception.Message)" -ForegroundColor Red }
                         }
                     }
+                    else {
+                        if (-not $Quiet) { Write-Host "[!] Analysis completed but no file hash returned" -ForegroundColor Yellow }
+                    }
+                    Write-Progress -Activity "VirusTotal Analysis" -Completed
                     return
                 }
                 else {
@@ -22267,16 +22918,22 @@ function Hunt-VirusTotal {
     
         $attrs = $VTReport.data.attributes
         $stats = $attrs.last_analysis_stats
+        
+        # Validate stats object exists
+        if (-not $stats) {
+            Write-Error "Missing analysis statistics in VirusTotal response"
+            return $null
+        }
     
         $result = [PSCustomObject]@{
             Hash             = $Hash
             HashType         = $HashType
             FilePath         = $FilePath
-            Malicious        = $stats.malicious
-            Suspicious       = $stats.suspicious
-            Undetected       = $stats.undetected
-            Harmless         = $stats.harmless
-            Total            = ($stats.malicious + $stats.suspicious + $stats.undetected + $stats.harmless)
+            Malicious        = if ($null -ne $stats.malicious) { $stats.malicious } else { 0 }
+            Suspicious       = if ($null -ne $stats.suspicious) { $stats.suspicious } else { 0 }
+            Undetected       = if ($null -ne $stats.undetected) { $stats.undetected } else { 0 }
+            Harmless         = if ($null -ne $stats.harmless) { $stats.harmless } else { 0 }
+            Total            = if ($stats.malicious -or $stats.suspicious -or $stats.undetected -or $stats.harmless) { ($stats.malicious + $stats.suspicious + $stats.undetected + $stats.harmless) } else { 0 }
             Filename         = $attrs.meaningful_name
             FileType         = $attrs.type_description
             Size             = $attrs.size
@@ -22379,11 +23036,16 @@ function Hunt-VirusTotal {
             Write-Host $Result.SignatureInfo -ForegroundColor White
         }
     
-        if ($Result.Reputation -ne $null) {
+        if ($null -ne $Result.Reputation) {
             Write-Host "Reputation       : " -NoNewline -ForegroundColor Yellow
-            $repColor = if ($Result.Reputation -lt 0) { "Red" } elseif ($Result.Reputation -eq 0) { "Yellow" } else { "Green" }
-            $repValue = if ($Result.Reputation -gt 0) { "+$($Result.Reputation)" } else { $Result.Reputation }
-            Write-Host $repValue -ForegroundColor $repColor
+            try {
+                $repColor = if ($Result.Reputation -lt 0) { "Red" } elseif ($Result.Reputation -eq 0) { "Yellow" } else { "Green" }
+                $repValue = if ($Result.Reputation -gt 0) { "+$($Result.Reputation)" } else { $Result.Reputation }
+                Write-Host $repValue -ForegroundColor $repColor
+            }
+            catch {
+                Write-Host $Result.Reputation -ForegroundColor Yellow
+            }
         }
 
         if ($Result.FirstSeen) {
@@ -22476,22 +23138,33 @@ function Hunt-VirusTotal {
         # Sanitize data for Excel
         try {
             $sanitizedResults = $Results | ForEach-Object {
-                $obj = $_.PSObject.Copy()
-                foreach ($prop in $obj.PSObject.Properties) {
-                    if ($null -ne $prop.Value) {
-                        $value = $prop.Value.ToString()
-                        # Escape leading equals sign to prevent formula execution
-                        if ($value.StartsWith("=")) {
-                            $value = "'" + $value
+                $originalObj = $_
+                $newObj = @{}
+                
+                foreach ($prop in $originalObj.PSObject.Properties) {
+                    try {
+                        if ($null -ne $prop.Value) {
+                            $value = $prop.Value.ToString()
+                            # Escape leading equals sign to prevent formula execution
+                            if ($value.StartsWith("=") -or $value.StartsWith("+") -or $value.StartsWith("-") -or $value.StartsWith("@")) {
+                                $value = "'" + $value
+                            }
+                            # Truncate if too long (Excel limit is 32,767 characters per cell)
+                            if ($value.Length -gt 32000) {
+                                $value = $value.Substring(0, 32000) + "..."
+                            }
+                            $newObj[$prop.Name] = $value
                         }
-                        # Truncate if too long (Excel limit is 32,767 characters per cell)
-                        if ($value.Length -gt 32000) {
-                            $value = $value.Substring(0, 32000) + "..."
+                        else {
+                            $newObj[$prop.Name] = ""
                         }
-                        $prop.Value = $value
+                    }
+                    catch {
+                        Write-Verbose "Failed to sanitize property $($prop.Name): $($_.Exception.Message)"
+                        $newObj[$prop.Name] = ""
                     }
                 }
-                $obj
+                [PSCustomObject]$newObj
             }
         }
         catch {
@@ -22594,12 +23267,18 @@ function Hunt-VirusTotal {
     # Validate and identify hash type
     if ($null -ne $Hash) {
         $Hash = $Hash -replace '[^a-fA-F0-9]', ''
+        
+        if ([string]::IsNullOrWhiteSpace($Hash)) {
+            Write-Error "Invalid hash: No valid hexadecimal characters found"
+            return
+        }
+        
         $hashType = switch ($Hash.Length) {
             32 { "MD5" }
             40 { "SHA1" }
             64 { "SHA256" }
             default { 
-                Write-Error "Invalid hash format. Supported: MD5 (32), SHA1 (40), SHA256 (64) characters"
+                Write-Error "Invalid hash format. Supported: MD5 (32), SHA1 (40), SHA256 (64) characters. Received: $($Hash.Length) characters"
                 return
             }
         }

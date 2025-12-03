@@ -1,12 +1,12 @@
 # ThreatHunter Manifest
 @{
-    # Script module file this manifest is for
+    # Script module filename
     RootModule         = 'ThreatHunter.psm1'
     
-    # Version number of this module
+    # Module version number
     ModuleVersion      = '1.0.0'
     
-    # Unique identifier for this module
+    # Module nique identifier
     GUID               = '48e59dc3-154d-4db0-a9c7-2c57dde9103b'
     
     # Author info
@@ -14,13 +14,13 @@
     CompanyName        = 'Independent'
     Copyright          = '(c) 2025 Blake White. All rights reserved.'
     
-    # Description of the module
+    # Module description
     Description        = 'PowerShell Digital Forensics and Incident Response (DFIR) module for comprehensive threat hunting, persistence analysis, and forensic data collection.'
     
-    # Minimum PowerShell version
+    # Minimum PowerShell version required
     PowerShellVersion  = '5.1'
     
-    # Exported functions - all Hunt-* functions
+    # Exported module functions 
     FunctionsToExport  = @(
         'Hunt-Persistence',
         'Hunt-Files',
@@ -29,6 +29,7 @@
         'Hunt-Registry',
         'Hunt-Services',
         'Hunt-Tasks',
+        'Hunt-VirusTotal',
         'Hunt-ForensicDump'
     )
     
@@ -44,21 +45,16 @@
     # External dependencies
     RequiredModules    = @()
     
-    # Required assemblies for module functionality
-    RequiredAssemblies = @(
-        'System.IO.Compression.FileSystem.dll',
-        'System.Security.dll',
-        'System.Web.dll'
-    )
+    # Required assemblies
+    RequiredAssemblies = @()
     
-    # Optional: nested modules
+    # Nested modules
     NestedModules      = @()
     
-    # Private module data (metadata and PSGallery info)
+    # Private module data
     PrivateData        = @{
         PSData = @{
-            # Tags for PowerShell Gallery
-            Tags         = @(
+            Tags                       = @(
                 'DFIR',
                 'Digital-Forensics',
                 'Incident-Response',
@@ -73,44 +69,57 @@
                 'Registry',
                 'Services',
                 'Tasks',
+                'ScheduledTasks',
                 'ADS',
                 'Alternate-Data-Streams',
                 'Windows-Forensics',
-                'MITRE-ATTCK'
+                'MITRE-ATTCK',
+                'TA0003',
+                'TA0005',
+                'VirusTotal',
+                'Caching',
+                'Automation',
+                'PowerShell-5',
+                'Windows'
             )
             
-            # License
-            LicenseUri   = 'https://opensource.org/licenses/MIT'
+            LicenseUri                 = 'https://opensource.org/licenses/MIT'
             
-            # Project repository
-            ProjectUri   = 'https://github.com/blwhit/ThreatHunter'
+            ProjectUri                 = 'https://github.com/blwhit/ThreatHunter'
             
-            # Icon for PowerShell Gallery (optional)
-            # IconUri    = 'https://github.com/blwhit/ThreatHunter/raw/main/icon.png'
-            
-            # Release notes
-            ReleaseNotes = @'
+            ReleaseNotes               = @'
 ThreatHunter v1.0.0 - Initial Release (2025)
 
 FEATURES:
-- Hunt-Persistence: Comprehensive Windows persistence mechanism detection
-- Hunt-Files: Advanced file system analysis with ADS detection and hash calculations
-- Hunt-Browser: Browser history extraction (standard + NirSoft LoadTool mode)
-- Hunt-Logs: Windows Event Log analysis with custom log provider support
-- Hunt-Registry: Registry key hunting for common persistence locations
-- Hunt-Services: Windows service enumeration and analysis
-- Hunt-Tasks: Scheduled task analysis with hash calculations
+- Hunt-Persistence: 45+ Windows persistence mechanism detection techniques
+- Hunt-Files: Advanced file system analysis with ADS detection, signature verification, and hash calculations
+- Hunt-Browser: Browser history extraction supporting 15+ browsers (standard + NirSoft LoadTool mode with caching)
+- Hunt-Logs: Windows Event Log analysis with intelligent caching system and custom log provider support
+- Hunt-Registry: Registry key hunting with offline hive mounting and analysis
+- Hunt-Services: Windows service enumeration with DLL extraction (5 fallback methods for svchost.exe)
+- Hunt-Tasks: Scheduled task analysis with comprehensive hash calculations and forensic metadata
+- Hunt-VirusTotal: VirusTotal API integration for hash/file/URL analysis with monitoring and CSV export
 - Hunt-ForensicDump: Master function for complete forensic data collection with interactive HTML reports
 
 CAPABILITIES:
-- PowerShell 5.1+ compatible
+- PowerShell 5.1+ compatible (Windows-only)
+- Advanced caching system for Hunt-Logs (session-persistent, intelligent cache invalidation)
 - Interactive HTML reports with search and filtering
-- JSON and CSV export formats
+- JSON and CSV export formats with formula injection protection
 - LoadFromJson mode for report regeneration
-- Configurable date ranges (relative and absolute)
-- Auto and Aggressive collection modes
-- MITRE ATT&CK technique mapping
-- Memory-efficient processing for large datasets
+- Configurable date ranges (relative: 7D, 24H, 30M and absolute)
+- Multiple detection modes: Auto (high-fidelity), Aggressive, All, Insane
+- MITRE ATT&CK technique mapping (18+ techniques across TA0003, TA0005, TA0007, TA0009, TA0011)
+- Memory-efficient processing for large datasets (configurable limits)
+- LNK shortcut target resolution with hash calculation
+- Signature verification with detailed certificate analysis
+- Living-off-the-land binary (LOLBIN) detection
+- Base64/hex/PowerShell encoding detection
+- Network indicator detection (IPs, domains, URLs)
+- Offline EVTX analysis support
+- Registry hive mounting for forensic analysis
+- Browser extension enumeration (Chromium and Firefox)
+- Filesystem aggressive search mode with caching
 
 NOTE ON UNAPPROVED VERBS:
 This module uses the "Hunt-" verb prefix, which is not in PowerShell's approved verb list.
@@ -123,7 +132,16 @@ To suppress the verb warning during import:
 REQUIREMENTS:
 - Windows PowerShell 5.1 or PowerShell 7+
 - Administrator privileges recommended for full functionality
-- Internet connectivity optional (required for NirSoft LoadTool downloads)
+- Internet connectivity optional (required for NirSoft LoadTool downloads and VirusTotal API)
+
+INTERNAL DEPENDENCIES:
+Helper functions-
+- Get-FileFromCommandLine: Extracts executables from command lines (20+ patterns)
+- Find-ExecutableInSystemPaths: Resolves relative paths in 9 system directories
+- Get-RegistryHivesForAnalysis: Registry hive enumeration with optional mounting
+- Mount-RegistryHive: Loads NTUSER.DAT files for offline analysis
+- Dismount-AllRegistryHives: Cleanup for mounted hives
+- Close-RegistryHandles: Forces garbage collection for registry handle release
 
 DOCUMENTATION:
 - GitHub Wiki: https://github.com/blwhit/ThreatHunter/wiki
@@ -131,15 +149,9 @@ DOCUMENTATION:
 - Issue Tracker: https://github.com/blwhit/ThreatHunter/issues
 '@
             
-            # Prerelease string (comment out for stable release)
-            # Prerelease = 'beta'
-            
-            # Suppress unapproved verb warning message
-            # Note: This doesn't actually suppress the warning, but documents the intention
-            # Users should import with: Import-Module ThreatHunter -WarningAction SilentlyContinue
+            ExternalModuleDependencies = @()
         }
     }
     
-    # Help info URI
     HelpInfoURI        = 'https://github.com/blwhit/ThreatHunter/wiki'
 }
