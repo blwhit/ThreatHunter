@@ -38,6 +38,7 @@
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 
+
 # Script Variables
 # -------------------
 # Hunt-Persistence
@@ -48,40 +49,190 @@ $script:SuspiciousStringIOCs = @(
     "onestart",
     "update.js"
 )
+
 $script:AggressiveStringIOCs = @(
-    "-ExecutionPolicy Bypass",
-    "-ep bypass", 
-    "-ex bypass",
-    "-WindowStyle Hidden",
-    "-w hidden",
-    "-NoProfile",
-    "-nop",
-    "-NonInteractive", 
-    "-noni",
-    "-EncodedCommand",
-    "-enc"
+    "-ExecutionPolicy Bypass", "-ep bypass", "-ex bypass",
+    "-WindowStyle Hidden", "-w hidden",
+    "-NoProfile", "-nop",
+    "-NonInteractive", "-noni",
+    "-EncodedCommand", "-enc",
+    "-Command", "-c ",
+    "IEX ", "Invoke-Expression",
+    "DownloadString", "DownloadFile",
+    "Net.WebClient", "System.Net.WebClient",
+    "BitsTransfer", "Start-BitsTransfer",
+    "Invoke-WebRequest", "iwr ",
+    "Invoke-RestMethod", "irm ",
+    "FromBase64String",
+    "IO.Compression", "IO.MemoryStream",
+    "Reflection.Assembly", "::Load",
+    "Runtime.InteropServices", "Runtime.InteropServices.Marshal",
+    "-noexit -c", "add-type"
 )
-$script:InsaneStringIOCs = @("-e ", '\Temp\', '\AppData\', '\Users\')
-$script:suspiciousFileExt = @('.vbs', '.js', '.bat', '.cmd', '.ps1', '.wsf', '.hta', '.jar', '.py', '.pl', '.conf')
-$script:suspiciousPaths = @('%TEMP%', '%APPDATA%', '%USERPROFILE%')
-# Shared, Already exists below --- $script:suspiciousTLDs = @('.top', '.xyz', '.shop', '.dev', '.ru', '.cn')
-$script:executionBinaries = @('PowerShell.exe', 'CMD.exe', 'Node.exe', 'wscript.exe')
+
+$script:InsaneStringIOCs = @(
+    # Custom        
+    "-e ",
+
+    # Common PowerShell Base64 prefixes
+    "-e JAB", "-e SUVYI", "-e aWV4", "-e cwB0AGE",
+    "-enc JAB", "-enc SUVYI", "-enc aWV4", "-enc cwB0AGE",
+    
+    # Suspicious command combinations
+    "cmd /c powershell", "cmd.exe /c echo", "powershell -c cmd",
+    
+    # Remote execution indicators - UNC paths
+    "\\*\\c$", "\\*\\admin$", "\\*\\ipc$",
+    "\\*\\C$", "\\*\\ADMIN$", "\\*\\IPC$",
+    
+    # Temp + execution combo
+    "*\\Temp\\*.exe", "*\\Temp\\*.bat", "*\\Temp\\*.vbs", "*\\Temp\\*.ps1",
+    "*\\AppData\\Local\\Temp\\*.exe",
+    "*\\Users\\*\\AppData\\Local\\Temp\\*",
+    
+    # Suspicious downloads to temp
+    "http*\\Temp*", "https*\\AppData*",
+    
+    # Process injection/hollowing indicators
+    "VirtualAlloc", "WriteProcessMemory", "CreateRemoteThread",
+    "NtCreateThreadEx", "RtlCreateUserThread", "QueueUserAPC"
+)
+
+$script:suspiciousFileExt = @(
+    '.vbs', '.js', '.bat', '.cmd', '.ps1', '.wsf', '.hta', '.jar', '.py', '.pl', '.conf',
+    '.jse', '.vbe',
+    '.psc1', '.psm1',
+    '.application',
+    '.gadget',
+    '.msi', '.msp',
+    '.scr',
+    '.lnk',
+    '.url',
+    '.sct', '.wsh',
+    '.reg',
+    #'.inf',
+    '.cpl'
+)
+
+$script:suspiciousPaths = @(
+    '\Temp\', '\TMP\',
+    '\AppData\', '\Local\Temp\',
+    '\Downloads\',
+    '\Public\',
+    '\ProgramData\',
+    'C:\Windows\Temp\',
+    'system32\config\',
+    'system32\drivers\',
+    '\$Recycle.Bin\',
+    '\Recovery\',
+    '\System Volume Information\',
+    '\INetCache\',
+    '\Temp\Low\',
+    '\INetCookies\',
+    'C:\Intel\',
+    'C:\PerfLogs\',
+    'C:\Recovery\',
+    '\Start Menu\',
+    '\Startup\',
+    '\Recent\',
+    '\SendTo\'
+)
+
+$script:executionBinaries = @(
+    'PowerShell.exe', 'pwsh.exe',
+    'CMD.exe',
+    'wscript.exe', 'cscript.exe',
+    'mshta.exe', 'rundll32.exe', 'regsvr32.exe', 'certutil.exe',
+    'bitsadmin.exe', 'msiexec.exe', 'installutil.exe',
+    'regasm.exe', 'regsvcs.exe', 'msxsl.exe',
+    'forfiles.exe', 'pcalua.exe', 'SyncAppvPublishingServer.exe',
+    'odbcconf.exe', 'ieexec.exe', 'xwizard.exe',
+    'Node.exe', 'python.exe', 'perl.exe', 'ruby.exe', 'java.exe', 'javaw.exe',
+    'psexec.exe', 'psexesvc.exe', 'paexec.exe',
+    'winrm.exe', 'winrs.exe', 'wmic.exe',
+    'wget.exe', 'curl.exe', 'aria2c.exe',
+    '7z.exe', 'rar.exe', 'winrar.exe', 'zip.exe'
+)
 
 # Browser Related (Hunt-Browser)
 $script:suspiciousBrowserStrings = @(
-    'file://', 'http:', 'https:', '.exe', '.bat', '.cmd', '.ps1', '.vbs', '.js', 'C:\', '://'
+    # Direct IP access patterns
+    'http://*.*.*.*', 'https://*.*.*.*',
+    'http://10.*', 'http://172.*', 'http://192.168.*',
+    'http://127.0.0.1*', 'http://localhost*',
+    
+    # Local file execution - fixed triple slashes
+    'file:///*exe', 'file:///*bat', 'file:///*cmd', 'file:///*ps1',
+    'file:///*vbs', 'file:///*js', 'file:///*hta', 'file:///*scr',
+    'file:///*jar', 'file:///*msi',
+    
+    # Suspicious paths in URLs
+    '*/temp/*.exe', '*/temp/*.zip', '*/temp/*.rar', '*/temp/*.7z',
+    '*/tmp/*.exe', '*/tmp/*.ps1', '*/tmp/*.bat',
+    '*/cache/*.exe', '*/cache/*.dll',
+    '*/download/*.exe', '*/download/*.zip',
+    '*/upload/*.exe', '*/upload/*.ps1',
+    
+    # Data URIs - removed angle brackets
+    'data:text/html*script*', 'data:text/html*javascript*',
+    'data:application/*base64*', 'data:text/*base64*',
+    
+    # Double extensions
+    '*.pdf.exe', '*.doc.exe', '*.xls.exe', '*.xlsx.exe',
+    '*.jpg.exe', '*.png.exe', '*.txt.exe', '*.gif.exe',
+    '*.pdf.bat', '*.doc.cmd', '*.xls.ps1', '*.jpg.scr',
+    '*.pdf.zip', '*.doc.zip', '*.xls.rar',
+    
+    # Shortened URLs
+    '*bit.ly/*', '*tinyurl.*', '*goo.gl/*', '*t.co/*',
+    '*rebrand.ly/*', '*ow.ly/*', '*is.gd/*',
+    '*short.link/*', '*cutt.ly/*', '*tiny.cc/*',
+    
+    # Suspicious query strings
+    '*?*cmd=*', '*?*exec=*', '*?*shell=*', '*?*payload=*',
+    '*?*command=*', '*?*execute=*', '*?*run=*',
+    '*&cmd=*', '*&exec=*', '*&shell=*',
+    
+    # Non-standard ports
+    '*:8080*', '*:8443*', '*:4444*', '*:1337*', '*:31337*',
+    '*:6666*', '*:7777*', '*:9999*', '*:5555*', '*:3389*',
+    
+    # Additional suspicious patterns
+    '*.onion*',
+    '*://pastebin.com/*', '*://paste.ee/*', '*://hastebin.com/*',
+    '*webhook.site*', '*discord.com/api/webhooks/*',
+    '*/admin.php*', '*/shell.php*', '*/cmd.php*',
+    '*powershell*', '*encoded*', '*base64*',
+    
+    # Executable download patterns
+    '*.exe?*', '*.bat?*', '*.ps1?*', '*.vbs?*',
+    '*.exe#*', '*.bat#*',
+    
+    # Suspicious domains patterns
+    '*-download.*', '*-update.*', '*-installer.*',
+    '*admin-*', '*login-*', '*secure-*', '*verify-*'
 )
 
 $script:aggressiveBrowserStrings = @(
     'file', 'download', 'login', 'password', 'admin', 'exploit', 'payload', 'shell', 
-    'reverse', 'bypass', 'hidden', 'encoded'
+    'reverse', 'bypass', 'hidden', 'encoded',
+    '*.pdf.exe', '*.doc.exe', '*.xls.exe', '*.jpg.exe', '*.txt.exe',
+    '*invoice*.exe', '*receipt*.exe', '*order*.exe', '*payment*.exe',
+    '*document*.exe', '*file*.exe', '*update*.exe', '*install*.exe',
+    '*crack*.exe', '*keygen*.exe', '*patch*.exe', '*activator*.exe',
+    '*.ps1', '*.bat', '*.cmd', '*.vbs', '*.js', '*.wsf', '*.hta',
+    '*.zip', '*.rar', '*.7z', '*.tar', '*.gz' 
 )
 
 $script:suspiciousTLDs = @(
     '.top', '.xyz', '.shop', '.dev', '.ru', '.cn', '.tk', '.ml', '.ga', '.cf',
     '.pw', '.cc', '.click', '.download', '.work', '.link', '.site', '.online',
     '.website', '.space', '.tech', '.store', '.bid', '.win', '.review', '.trade',
-    '.date', '.racing', '.cricket', '.science', '.party', '.gq', '.zip'
+    '.date', '.racing', '.cricket', '.science', '.party', '.gq', '.zip',
+    '.rest', '.bar', '.life', '.live', '.host', '.best', '.fun', '.skin',
+    '.cyou', '.buzz', '.vip', '.icu', '.monster', '.club', '.casa', '.uno',
+    '.lol', '.sbs', '.hair', '.beauty', '.mom', '.nexus', '.quest',
+    '.su', '.kp', '.sy', '.ir', '.ye', '.ly', '.to', '.ws', '.nu'
 )
 
 $script:PossibleTLDs = @(
@@ -89,34 +240,163 @@ $script:PossibleTLDs = @(
     '.tv', '.cc', '.ws', '.biz', '.info', '.name', '.pro', '.museum', '.coop',
     '.aero', '.jobs', '.mobi', '.travel', '.tel', '.asia', '.xxx', '.post',
     '.uk', '.ca', '.au', '.de', '.jp', '.fr', '.br', '.it', '.nl', '.be',
-    '.es', '.pl', '.no', '.se', '.dk', '.fi', '.ch', '.at', '.cz', '.hu'
+    '.es', '.pl', '.no', '.se', '.dk', '.fi', '.ch', '.at', '.cz', '.hu',
+    '.microsoft', '.google', '.amazon', '.apple', '.adobe', '.cisco'
 )
 
 # Hunt Logs
 $script:GlobalLogIOCs = @(
-    "mimikatz", "sekurlsa", "lsadump", "kerberoast", "bloodhound", "sharphound",
-    "powersploit", "invoke-mimikatz", "dump-sam", "ntds.dit", "hashdump",
-    "lateral movement", "psexec", "wmiexec", "smbexec", "winrm", "dcom",
-    "credential dumping", "token impersonation", "golden ticket", "silver ticket",
-    "dcsync", "zerologon", "printspoofer", "juicypotato", "rottenpotatong",
-    "cobalt strike", "beacon", "malleable", "stageless", "stager",
-    "metasploit", "meterpreter", "payload", "shellcode", "reflective dll",
-    "process hollowing", "dll injection", "thread injection", "atom bombing",
-    "suspicious powershell", "encoded command", "bypass execution policy",
-    "invoke-expression", "downloadstring", "webclient", "bitstransfer",
-    "certutil", "regsvr32", "rundll32", "mshta", "cscript", "wscript",
-    "living off the land", "lolbin", "applocker bypass", "uac bypass",
-    "privilege escalation", "persistence", "startup folder", "registry run",
-    "scheduled task", "wmi event", "com hijacking", "dll search order",
-    "suspicious network", "c2", "command and control", "exfiltration",
-    "dns tunneling", "icmp tunneling", "suspicious outbound", "tor",
-    "proxy", "vpn", "anonymization", "data staging", "archive", "compression"
+    # Custom - Default computer names
+    "WIN-*", "DESKTOP-*", "LAPTOP-*", 
+    "WORKGROUP\\WIN-*", "WORKGROUP\\DESKTOP-*",
+    
+    # Credential Dumping & Access
+    "mimikatz", "sekurlsa", "lsadump", "logonpasswords", "privilege::debug",
+    "kerberos::golden", "kerberos::silver", "kerberos::ptt", "kerberos::list",
+    "lsass.exe", "lsass.dmp", "lsass_", "dumpert", "procdump", "sqldumper",
+    "comsvcs.dll,MiniDump", "comsvcs.dll,#24", "MiniDumpWriteDump",
+    "ntds.dit", "SYSTEM.hiv", "SAM.hiv", "SECURITY.hiv",
+    "reg save HKLM\\SAM", "reg save HKLM\\SYSTEM", "reg save HKLM\\SECURITY",
+    "vssadmin create shadow", "copy \\\\?\\GLOBALROOT", "esentutl",
+    "pypykatz", "lazagne", "mimipenguin", "nanodump", "eviltwin",
+    
+    # Kerberos Attacks
+    "kerberoast", "asreproast", "rubeus", "getTGT", "asktgt", "asktgs",
+    "RC4_HMAC_MD5", "kirbi", "klist", "tgtdeleg",
+    "DES_CBC_MD5", "S4U2Self", "S4U2Proxy", "constrained delegation",
+    "unconstrained delegation", "resource-based constrained",
+    
+    # Active Directory Attacks
+    "dcsync", "zerologon", "printnightmare", "petitpotam", "samaccountname",
+    "nopac", "certifried", "shadow credentials", "msDS-KeyCredentialLink",
+    "bloodhound", "sharphound", "azurehound", "invoke-bloodhound",
+    "adexplorer", "adfind", "ldapsearch", "dsquery", "nltest",
+    "powerview", "Get-Domain", "Get-NetUser", "Get-NetGroup", "Get-NetComputer",
+    "Invoke-ShareFinder", "Invoke-UserHunter", "Find-LocalAdminAccess",
+    
+    # Lateral Movement
+    "psexec", "psexesvc", "paexec", "remcom", "ADMIN$", "C$", "IPC$",
+    "wmiexec", "wmic process call create", "Win32_Process",
+    "smbexec", "atexec", "at.exe", "schtasks", "sc.exe",
+    "winrm", "winrs", "Invoke-Command", "Enter-PSSession", "New-PSSession",
+    "dcomexec", "MMC20.Application", "ShellWindows", "ShellBrowserWindow",
+    "\\\\127.0.0.1\\", "\\\\localhost\\", "\\\\127.0.0.1\\C$", "\\\\localhost\\ADMIN$",
+    "pass-the-hash", "pass-the-ticket",
+    
+    # PowerShell Abuse
+    "-EncodedCommand", "-enc ", "-e ", "-ec ", "FromBase64String",
+    "-ExecutionPolicy Bypass", "-ep bypass", "-ex bypass",
+    "-WindowStyle Hidden", "-w hidden", "-window hidden",
+    "-NoProfile", "-nop", "-NonInteractive", "-noni",
+    "IEX*", "Invoke-Expression", "iex*New-Object", "DownloadString",
+    "Net.WebClient", "System.Net.WebClient", "Invoke-WebRequest",
+    "Invoke-RestMethod", "Start-BitsTransfer", "bitstransfer",
+    "Invoke-Mimikatz", "Invoke-Kerberoast", "Invoke-Rubeus",
+    "PowerSploit", "PowerUp", "PowerView", "Nishang", "Invoke-Obfuscation",
+    "Invoke-CradleCrafter", "Invoke-PSImage", "Out-EncryptedScript",
+    "Reflection.Assembly", "System.Reflection.Assembly::Load",
+    "Runtime.InteropServices", "VirtualAlloc", "WriteProcessMemory",
+    "CreateThread", "WaitForSingleObject", "System.Management.Automation.AmsiUtils",
+    
+    # LOLBins & Living Off the Land
+    "certutil -decode", "certutil -urlcache", "certutil.exe -f",
+    "bitsadmin /transfer", "bitsadmin /create", "bitsadmin /addfile",
+    "mshta.exe http", "mshta.exe javascript", "mshta vbscript",
+    "rundll32.exe javascript", "rundll32.exe http", "rundll32.exe C:\\\\Users",
+    "regsvr32 /s /u /i:http", "regsvr32.exe /s /n /u",
+    "msiexec /quiet /i http", "msiexec.exe /q /i",
+    "wmic process call create", "wmic /node:", "wmic shadowcopy",
+    "installutil.exe /logfile=", "installutil.exe /U",
+    "regasm.exe /U", "regsvcs.exe /U",
+    "msbuild.exe", "csc.exe", "jsc.exe", "vbc.exe",
+    "cmstp.exe /s", "odbcconf.exe /S /A",
+    "forfiles /p c:\\\\windows\\\\system32 /m cmd.exe /c",
+    "pcalua.exe -a", "SyncAppvPublishingServer.exe",
+    "mavinject.exe", "dfsvc.exe", "ieexec.exe", "xwizard.exe",
+    
+    # Defense Evasion
+    "amsi", "AmsiScanBuffer", "AmsiInitFailed", "amsiInitFailed",
+    "ETW", "EtwEventWrite", "Event Tracing for Windows",
+    "Set-MpPreference -DisableRealtimeMonitoring", "Set-MpPreference -DisableIOAVProtection",
+    "Add-MpPreference -ExclusionPath", "Add-MpPreference -ExclusionExtension",
+    "Uninstall-WindowsFeature", "Disable-WindowsOptionalFeature",
+    "sc.exe stop", "net stop", "taskkill /F /IM",
+    "powershell.exe -version 2", "powershell -v 2",
+    "AppLocker", "SRP", "WDAC", "constrained language mode",
+    "Bypass", "Unhook", "Patch", "Inline", "Detour",
+    "Process Hollowing", "Process Doppelganging", "Process Herpaderping",
+    "Reflective DLL", "reflective PE", "DLL Injection", "Thread Injection",
+    "CreateRemoteThread", "QueueUserAPC", "SetWindowsHookEx", "RtlCreateUserThread",
+    "NtMapViewOfSection", "NtQueueApcThread", "NtCreateThreadEx",
+    
+    # Persistence
+    "schtasks /create", "New-ScheduledTask", "Register-ScheduledTask",
+    "reg add HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
+    "reg add HKLM\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
+    "wmic /NAMESPACE:", "ActiveScriptEventConsumer", "__EventFilter",
+    "CommandLineEventConsumer", "__FilterToConsumerBinding",
+    "DLL Search Order Hijacking", "COM Hijacking", "Accessibility Features",
+    "Sticky Keys", "sethc.exe", "utilman.exe", "osk.exe", "magnify.exe",
+    "AppInit_DLLs", "Image File Execution Options", "Debugger",
+    "Winlogon\\\\Shell", "Winlogon\\\\Userinit", "Winlogon\\\\Notify",
+    "netsh advfirewall", "New-NetFirewallRule", "netsh wlan",
+    
+    # Reconnaissance
+    "net user /domain", "net group /domain", "net localgroup administrators",
+    "nltest /dclist", "nltest /domain_trusts", "nltest /all_trusts",
+    "dsquery", "csvde", "ldifde", "gpresult",
+    "Get-ADUser", "Get-ADGroup", "Get-ADComputer", "Get-ADDomain",
+    "whoami /all", "whoami /priv", "quser", "query user",
+    "tasklist", "netstat -ano", "ipconfig /all", "route print",
+    "arp -a", "net view", "net share", "net session",
+    "systeminfo", "wmic qfe", "wmic product", "wmic service",
+    
+    # Exfiltration & Data Staging
+    "7z.exe a -p", "rar.exe a -hp", "zip -e", "tar -czf",
+    "xcopy /s /e /h", "robocopy", "copy \\\\\\\\", "move \\\\\\\\",
+    "rclone", "megasync", "mega-cmd", "dropbox",
+    "Compress-Archive", "System.IO.Compression",
+    "ftps://", "sftp://", "scp ", "rsync ",
+    "pastebin.com", "paste.ee", "hastebin", "ghostbin",
+    "transfer.sh", "anonfiles.com", "gofile.io", "file.io",
+    "discord.com/api/webhooks", "webhook.site",
+    
+    # Network & Tunneling
+    "ngrok", "cloudflared", "serveo", "localhost.run", "pagekite",
+    "ssh -R", "ssh -L", "ssh -D", "plink.exe",
+    "chisel", "ligolo", "revsocks", "rpivot",
+    "socks", "socks4", "socks5", "proxy", "proxychains",
+    "socat", "netcat", "nc.exe", "nc64.exe", "ncat.exe",
+    "dnscat", "iodine", "dns2tcp", "icmptunnel",
+    "tor.exe", ".onion", "torsocks", "i2p",
+    
+    # Web Shells & Remote Access
+    "webshell", "aspx", "cmd.aspx", "shell.php", "c99.php",
+    "eval*", "eval*base64_decode",
+    "?php system*", "passthru*", "shell_exec*",
+    "TeamViewer.exe", "AnyDesk.exe", "vnc", "rdp", "mstsc.exe",
+    "ScreenConnect", "RemotePC", "LogMeIn", "GoToMyPC",
+    
+    # Suspicious Downloads & Scripts
+    "http://", "https://", "ftp://", "\\\\\\\\\\\\", "//",
+    ".ps1", ".bat", ".cmd", ".vbs", ".js", ".wsf", ".hta",
+    ".exe", ".dll", ".scr", ".com", ".pif",
+    "download", "wget", "curl", "Invoke-WebRequest", "iwr",
+    "C:\\\\Users\\\\Public", "C:\\\\ProgramData", "C:\\\\Windows\\\\Temp",
+    "C:\\\\Users\\\\*\\\\AppData\\\\Local\\\\Temp", "C:\\\\Users\\\\*\\\\Downloads",
+    "%TEMP%", "%TMP%", "%APPDATA%", "%LOCALAPPDATA%",
+    
+    # Obfuscation Indicators
+    "base64", "FromBase64", "ToBase64", "Convert::FromBase64String",
+    "gzip", "deflate", "compress", "decompress",
+    "xor", "rot13", "caesar", "reverse",
+    "char*", "chr*", "-join", "-split", "-replace",
+    "randomize", "obfuscate", "encode", "decode"
 )
 
 
-
 # Script Helper Functions 
-
+# --------------------------
 function Get-FileFromCommandLine {
     param([String]$CommandLine)
 
@@ -8989,21 +9269,43 @@ https://attack.mitre.org/tactics/TA0003/
         if ($Mode -eq 'Aggressive') {
             foreach ($fieldValue in @($valueToCheck, $executePathToCheck)) {
                 if ($fieldValue) {
-                    foreach ($ext in $script:suspiciousFileExt) {
-                        # Special handling for .js to exclude .json
-                        if ($ext -eq '.js') {
-                            # Only match .js that is NOT part of .json
-                            # Check for .js as a standalone extension (word boundary or end of string)
-                            if ($fieldValue -match '\.js(\s|$|"|\||;|,)' -and $fieldValue -notmatch '\.json') {
-                                $flags += "SUS_EXT: '$ext'"
+                    # Extract the actual file extension from the path
+                    # Handle cases where there might be arguments after the executable
+                    $filePath = $fieldValue
+                    
+                    # If there are spaces, take the first part (the actual file path)
+                    if ($filePath -match '^"?([^"]+\.exe|[^"]+\.dll|[^"]+\.sys|[^\s"]+)"?\s') {
+                        $filePath = $matches[1]
+                    }
+                    elseif ($filePath -match '^([^\s]+)') {
+                        $filePath = $matches[1]
+                    }
+                    
+                    # Get the actual file extension
+                    try {
+                        $actualExtension = [System.IO.Path]::GetExtension($filePath).ToLower()
+                        
+                        if (![string]::IsNullOrWhiteSpace($actualExtension)) {
+                            # Check if this extension is in our suspicious list
+                            foreach ($ext in $script:suspiciousFileExt) {
+                                $extLower = $ext.ToLower()
+                                
+                                # Special handling for .js to exclude .json
+                                if ($extLower -eq '.js') {
+                                    if ($actualExtension -eq '.js') {
+                                        $flags += "SUS_EXT: '$ext'"
+                                        break
+                                    }
+                                }
+                                elseif ($actualExtension -eq $extLower) {
+                                    $flags += "SUS_EXT: '$ext'"
+                                    break
+                                }
                             }
                         }
-                        else {
-                            # For all other extensions, use the original logic
-                            if ($fieldValue -like "*$ext*") {
-                                $flags += "SUS_EXT: '$ext'"
-                            }
-                        }
+                    }
+                    catch {
+                        Write-Verbose "Error extracting extension from: $fieldValue"
                     }
                 }
             }
@@ -9102,7 +9404,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Windows Error Reporting Debugger' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS_SIG"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9113,7 +9415,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Command Processor AutoRun' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS_SIG"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9124,7 +9426,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Explorer Load Property' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS_SIG"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9150,7 +9452,7 @@ https://attack.mitre.org/tactics/TA0003/
             'AppCertDlls' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS_SIG"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9166,14 +9468,7 @@ https://attack.mitre.org/tactics/TA0003/
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
-                    if ($Insane) {
-                        if (-not $hasValidSignature) {
-                            $flags += "NOT_SIGNED"
-                        }
-                        if (-not $hasMicrosoftSignature) {
-                            $flags += "NOT_MS_SIGNED"
-                        }
-                    }
+                    # Name mismatch check
                     if (-not (Test-AppPathsNameMatch $pathToCheck $valueToCheck $signatureToCheck)) {
                         $flags += "NAME_MISMATCH"
                     }
@@ -9182,6 +9477,8 @@ https://attack.mitre.org/tactics/TA0003/
                     if ($valueToCheck -ne $executePathToCheck -and $valueToCheck -like "* *") {
                         $flags += "HAS_ARGUMENTS"
                     }
+                    
+                    # Note: Signature checks handled by common additional checks section below
                 }
             }
             
@@ -9279,7 +9576,7 @@ https://attack.mitre.org/tactics/TA0003/
             'LSA Extensions DLL' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9290,7 +9587,7 @@ https://attack.mitre.org/tactics/TA0003/
             'ServerLevelPluginDll DNS Hijacking' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9301,7 +9598,7 @@ https://attack.mitre.org/tactics/TA0003/
             'LSA Password Filter DLL' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9312,7 +9609,7 @@ https://attack.mitre.org/tactics/TA0003/
             'LSA Authentication Package DLL' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9323,7 +9620,7 @@ https://attack.mitre.org/tactics/TA0003/
             'LSA Security Package DLL' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9334,7 +9631,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Winlogon Notification Package' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9391,7 +9688,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Terminal Services InitialProgram' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS_SIG"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9423,7 +9720,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Silent Process Exit Monitor' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9434,7 +9731,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Telemetry Controller Command' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9445,7 +9742,7 @@ https://attack.mitre.org/tactics/TA0003/
             'RDP WDS Startup Programs' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9478,7 +9775,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Explorer Tools Hijacking' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9489,7 +9786,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Explorer Context Menu Hijacking' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9511,7 +9808,7 @@ https://attack.mitre.org/tactics/TA0003/
             '.NET Startup Hooks DLL' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9534,7 +9831,7 @@ https://attack.mitre.org/tactics/TA0003/
             'Boot Verification Program Hijacking' {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9568,7 +9865,7 @@ https://attack.mitre.org/tactics/TA0003/
             { $_ -like "*SetupExecute*" } {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9579,7 +9876,7 @@ https://attack.mitre.org/tactics/TA0003/
             { $_ -like "*PlatformExecute*" } {
                 if ($Mode -eq 'Auto') {
                     if (-not $hasMicrosoftSignature) {
-                        $flags += "NOT_VALID_MS"
+                        $flags += "NOT_MS_SIGNED"
                     }
                 }
                 elseif ($Mode -eq 'Aggressive') {
@@ -9610,8 +9907,14 @@ https://attack.mitre.org/tactics/TA0003/
             # Flag unsigned executables (skip App Paths in non-Insane mode)
             if ($executePathToCheck -and -not $hasValidSignature) {
                 if ($PersistenceObject.Technique -notlike "App Paths Hijacking" -or $Insane) {
-                    $additionalFlags += "NO_VALID_SIG"
+                    $additionalFlags += "NOT_SIGNED"
                 }
+            }
+            
+            # Flag non-Microsoft signed executables in Insane mode
+            if ($Insane -and $executePathToCheck -and $hasValidSignature -and -not $hasMicrosoftSignature) {
+                # Only add if it's signed but NOT by Microsoft
+                $additionalFlags += "NOT_MS_SIGNED"
             }
             
             # Insane mode additional checks (for both All and Aggressive)
@@ -12479,11 +12782,10 @@ Requires -Search parameter. Results cached for performance on subsequent C:\ sca
 WARNING: Full C:\ scans can be time-intensive. Files >100MB automatically skipped.
 
 .PARAMETER Auto
-Automated hunting mode with predefined IOC lists:
-- Level 1: 14-day search, core logs (Security, System, PowerShell), baseline IOCs
-- Level 2: 30-day comprehensive search, all logs, full IOC list
-- Level 3: 30-day search with filesystem scanning (aggressive mode enabled)
-Uses global $GlobalLogIOCs variable. User parameters are additive (cannot reduce scope).
+Automated hunting mode using the full GlobalLogIOCs list.
+Applies all IOCs from $script:GlobalLogIOCs to the search.
+User can specify any StartDate, EndDate, LogNames, and other parameters.
+Auto mode does not enforce any date ranges or log provider restrictions.
 
 .PARAMETER StopLogging
 Stops Windows Event Log service and configures logs for forensic preservation.
@@ -12617,8 +12919,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         [Parameter(Mandatory = $false)]
         [string]$Aggressive,
         [Parameter(Mandatory = $false)]
-        [ValidateSet(1, 2, 3)]
-        [int]$Auto,
+        [switch]$Auto,
         [Parameter(Mandatory = $false)]
         [switch]$PassThru,
         [Parameter(Mandatory = $false)]
@@ -12633,22 +12934,48 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     # DEFENSIVE VALIDATION
     # ============================================================================
     
-    # Validate Search strings for potential issues with special characters
+    # Validate and sanitize Search strings for -like operator compatibility
     if ($Search.Count -gt 0) {
+        $sanitizedSearch = @()
         foreach ($searchStr in $Search) {
             if ([string]::IsNullOrWhiteSpace($searchStr)) {
-                Write-Warning "Empty or whitespace-only string found in -Search parameter. Removing."
-                $Search = $Search | Where-Object { ![string]::IsNullOrWhiteSpace($_) }
                 continue
             }
             
-            # Warn about special wildcard characters that might cause unexpected matches
-            if ($searchStr -match '[\[\]]') {
-                Write-Warning "Search string contains bracket characters [ or ]: '$searchStr'"
-                Write-Host "  These have special meaning in PowerShell -like operator." -ForegroundColor Yellow
-                Write-Host "  To search for literal brackets, escape them: ``[ or ``]" -ForegroundColor Yellow
+            # Auto-escape problematic characters for -like operator
+            $cleanStr = $searchStr
+            
+            # Remove or escape regex-specific characters that don't work with -like
+            # Square brackets: PowerShell -like uses these for character classes, escape them
+            if ($cleanStr -match '[\[\]]') {
+                $cleanStr = $cleanStr -replace '\[', '`[' -replace '\]', '`]'
+                Write-Verbose "Auto-escaped brackets in search string: '$searchStr' -> '$cleanStr'"
+            }
+            
+            # Remove regex anchors (^ $) - not valid in -like
+            if ($cleanStr -match '[\^\$]') {
+                $cleanStr = $cleanStr -replace '[\^\$]', ''
+                Write-Verbose "Removed regex anchors from search string: '$searchStr' -> '$cleanStr'"
+            }
+            
+            # Remove regex quantifiers that don't match wildcards (+ . {})
+            if ($cleanStr -match '[+.{}]') {
+                $cleanStr = $cleanStr -replace '[+.{}]', '*'
+                Write-Verbose "Converted regex quantifiers to wildcards: '$searchStr' -> '$cleanStr'"
+            }
+            
+            # Remove pipe characters (regex OR) - not valid in -like
+            if ($cleanStr -match '\|') {
+                $cleanStr = $cleanStr -replace '\|', ''
+                Write-Verbose "Removed pipe characters from search string: '$searchStr' -> '$cleanStr'"
+            }
+            
+            # Validate final string isn't empty after sanitization
+            if (![string]::IsNullOrWhiteSpace($cleanStr)) {
+                $sanitizedSearch += $cleanStr
             }
         }
+        $Search = $sanitizedSearch
     }
     
     # Validate Exclude strings
@@ -13199,117 +13526,161 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
             }
         }
     }
-    # Handle Auto mode
-    if ($PSBoundParameters.ContainsKey('Auto')) {
-        Write-Host "Running in Auto Mode (Level $Auto)..." -ForegroundColor Cyan
+    # Initialize timezone handling (MUST BE BEFORE Auto mode)
+    $systemTimeZone = [System.TimeZoneInfo]::Local
+
+    # Function to get timezone info by name/abbreviation
+    function Get-TimezoneInfo {
+        param($TimezoneName)
+    
+        $TimezoneName = $TimezoneName.ToUpper()
+    
+        $timezoneMap = @{
+            'UTC' = 'UTC'
+            'GMT' = 'GMT Standard Time'
+            'EST' = 'Eastern Standard Time'
+            'CST' = 'Central Standard Time' 
+            'MST' = 'Mountain Standard Time'
+            'PST' = 'Pacific Standard Time'
+            'EDT' = 'Eastern Standard Time'
+            'CDT' = 'Central Standard Time'
+            'MDT' = 'Mountain Standard Time'
+            'PDT' = 'Pacific Standard Time'
+        }
+    
+        $mappedName = if ($timezoneMap.ContainsKey($TimezoneName)) { $timezoneMap[$TimezoneName] } else { $TimezoneName }
+    
+        try {
+            if ($mappedName -eq 'UTC') {
+                return [System.TimeZoneInfo]::Utc
+            }
+            return [System.TimeZoneInfo]::FindSystemTimeZoneById($mappedName)
+        }
+        catch {
+            Write-Warning "Invalid timezone '$TimezoneName', using system local time"
+            return $systemTimeZone
+        }
+    }
+
+    # Function to parse time strings and convert to target timezone for search queries
+    function ConvertTo-DateTime {
+        param($InputValue, $TargetTimeZone)
         
-        # Define baseline parameters for each auto level
-        $baselineParams = @{}
-        $baselineLogNames = @()
-        $baselineAggressive = $false
-        
-        switch ($Auto) {
-            1 {
-                $baselineParams.StartDate = "14D"
-                $baselineParams.EndDate = "Now"
-                $baselineLogNames = @("PowerShell", "Microsoft-Windows-PowerShell/Operational", "System", "Security", "Application")
-                Write-Host "Auto Level 1: 14-day search with core log focus" -ForegroundColor Yellow
+        if ($InputValue -is [datetime]) {
+            # Convert to target timezone for internal processing, then back to system time for search
+            if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
+                $convertedTime = [System.TimeZoneInfo]::ConvertTime($InputValue, $TargetTimeZone, $systemTimeZone)
+                return $convertedTime
             }
-            2 {
-                $baselineParams.StartDate = "30D"
-                $baselineParams.EndDate = "Now"
-                Write-Host "Auto Level 2: 30-day comprehensive search" -ForegroundColor Yellow
-            }
-            3 {
-                $baselineParams.StartDate = "30D"
-                $baselineParams.EndDate = "Now"
-                $baselineAggressive = $true
-                Write-Host "Auto Level 3: 30-day search with filesystem analysis" -ForegroundColor Yellow
-            }
+            return $InputValue
         }
         
-        # Validate user parameters don't reduce scope (only allow additions)
-        if ($PSBoundParameters.ContainsKey('StartDate')) {
-            $userStartDate = ConvertTo-DateTime -InputValue $StartDate -TargetTimeZone ([System.TimeZoneInfo]::Local)
-            $baselineStartDate = ConvertTo-DateTime -InputValue $baselineParams.StartDate -TargetTimeZone ([System.TimeZoneInfo]::Local)
-            if ($userStartDate -gt $baselineStartDate) {
-                throw "Auto Mode Error: Cannot reduce search scope. StartDate '$StartDate' is more recent than baseline '$($baselineParams.StartDate)'. Use a date equal to or earlier than the baseline."
+        if ($InputValue -is [string]) {
+            $InputValue = $InputValue.Trim()
+            
+            if ($InputValue.ToLower() -eq 'now') {
+                return Get-Date
             }
-        }
-        
-        if ($PSBoundParameters.ContainsKey('EndDate')) {
-            $userEndDate = ConvertTo-DateTime -InputValue $EndDate -TargetTimeZone ([System.TimeZoneInfo]::Local)
-            $baselineEndDate = ConvertTo-DateTime -InputValue $baselineParams.EndDate -TargetTimeZone ([System.TimeZoneInfo]::Local)
-            if ($userEndDate -lt $baselineEndDate) {
-                throw "Auto Mode Error: Cannot reduce search scope. EndDate '$EndDate' is earlier than baseline '$($baselineParams.EndDate)'. Use a date equal to or later than the baseline."
+            
+            if ($InputValue -match '^(\d+)([DHMdhm])$') {
+                $number = [int]$matches[1]
+                $unit = $matches[2].ToUpper()
+                
+                $currentTime = Get-Date
+                switch ($unit) {
+                    'D' { return $currentTime.AddDays(-$number) }
+                    'H' { return $currentTime.AddHours(-$number) }
+                    'M' { return $currentTime.AddMinutes(-$number) }
+                }
             }
-        }
-        
-        # Validate LogNames are additive (baseline logs must be included)
-        if ($PSBoundParameters.ContainsKey('LogNames') -and $baselineLogNames.Count -gt 0) {
-            foreach ($baseLog in $baselineLogNames) {
-                if ($LogNames -notcontains $baseLog) {
-                    # Check for partial matches (case insensitive)
-                    $foundMatch = $false
-                    foreach ($userLog in $LogNames) {
-                        if ($userLog -like "*$baseLog*" -or $baseLog -like "*$userLog*") {
-                            $foundMatch = $true
-                            break
-                        }
+            else {
+                try {
+                    $parsedDate = [datetime]$InputValue
+                    # If user specified a timezone, interpret the input date as being in that timezone
+                    if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
+                        # Convert from target timezone to system timezone for search
+                        $convertedTime = [System.TimeZoneInfo]::ConvertTime($parsedDate, $TargetTimeZone, $systemTimeZone)
+                        return $convertedTime
                     }
-                    if (-not $foundMatch) {
-                        throw "Auto Mode Error: Cannot reduce search scope. Required baseline log '$baseLog' not found in user-specified LogNames. Add baseline logs to your list or remove -LogNames to use defaults."
-                    }
+                    return $parsedDate
+                }
+                catch {
+                    throw "Invalid date format: $InputValue. Use datetime, 'now', or relative format like '1D', '4H', or '10m'"
                 }
             }
         }
         
-        # Validate Aggressive parameter (Level 3 requires it)
-        if ($Auto -eq 3 -and $PSBoundParameters.ContainsKey('Aggressive') -and [string]::IsNullOrWhiteSpace($Aggressive)) {
-            throw "Auto Mode Error: Cannot disable Aggressive mode in Level 3. Remove -Aggressive parameter to use default, or specify a custom path."
+        throw "Invalid date input: $InputValue"
+    }
+
+    # Function to format datetime with timezone for display
+    function Format-DateTimeWithTimeZone {
+        param($DateTime, $TargetTimeZone)
+        
+        # Convert from system time to target timezone for display
+        if ($TargetTimeZone.Id -eq $systemTimeZone.Id) {
+            $convertedTime = $DateTime
+            $tzAbbrev = $systemTimeZone.StandardName.Split(' ')[0]
+        }
+        else {
+            $convertedTime = [System.TimeZoneInfo]::ConvertTime($DateTime, $systemTimeZone, $TargetTimeZone)
+            
+            $tzAbbrev = if ($TargetTimeZone.Id -eq 'UTC') { 
+                'UTC' 
+            }
+            elseif ($TargetTimeZone.StandardName -like "*Eastern*") { 
+                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'EDT' } else { 'EST' } 
+            }
+            elseif ($TargetTimeZone.StandardName -like "*Central*") { 
+                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'CDT' } else { 'CST' } 
+            }
+            elseif ($TargetTimeZone.StandardName -like "*Mountain*") { 
+                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'MDT' } else { 'MST' } 
+            }
+            elseif ($TargetTimeZone.StandardName -like "*Pacific*") { 
+                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'PDT' } else { 'PST' } 
+            }
+            else { 
+                $TargetTimeZone.StandardName.Split(' ')[0] 
+            }
         }
         
-        # Build final parameters by combining baseline with user additions
+        return $convertedTime.ToString("yyyy-MM-dd HH:mm:ss") + " $tzAbbrev"
+    }
+
+    $targetTimeZone = if ([string]::IsNullOrWhiteSpace($Timezone)) { $systemTimeZone } else { Get-TimezoneInfo -TimezoneName $Timezone }
+
+    # Handle Auto mode - SIMPLIFIED VERSION
+    if ($Auto) {
+        Write-Host "Running in Auto Mode..." -ForegroundColor Cyan
+        Write-Host "Auto Mode: Using full IOC list ($($script:GlobalLogIOCs.Count) IOCs) with user-specified parameters" -ForegroundColor Yellow
+        
+        # Build search parameters - use ONLY what user specified
         $finalParams = @{
-            StartDate = if ($PSBoundParameters.ContainsKey('StartDate') -and $null -ne $StartDate) { $StartDate } else { $baselineParams.StartDate }
-            EndDate   = if ($PSBoundParameters.ContainsKey('EndDate') -and $null -ne $EndDate) { $EndDate } else { $baselineParams.EndDate }
-            Search    = @($script:GlobalLogIOCs) + $Search  # Combine baseline IOCs with user additions
+            Search    = @($script:GlobalLogIOCs) + $Search  # Full IOC list + user additions
             SortOrder = $SortOrder
             XML       = $XML
             MSG       = $MSG
             MaxPrint  = $MaxPrint
             Timezone  = $Timezone
+            PassThru  = $PassThru
+            Quiet     = $Quiet
         }
         
-        # Add LogNames (combine baseline with user additions)
-        if ($baselineLogNames.Count -gt 0) {
-            $finalParams.LogNames = $baselineLogNames + $LogNames | Select-Object -Unique
-        }
-        elseif ($LogNames.Count -gt 0) {
-            $finalParams.LogNames = $LogNames
-        }
-        
-        # Add other optional parameters
+        # Add user-specified parameters (dates, logs, filters)
+        if ($PSBoundParameters.ContainsKey('StartDate')) { $finalParams.StartDate = $StartDate }
+        if ($PSBoundParameters.ContainsKey('EndDate')) { $finalParams.EndDate = $EndDate }
+        if ($LogNames.Count -gt 0) { $finalParams.LogNames = $LogNames }
         if ($Exclude.Count -gt 0) { $finalParams.Exclude = $Exclude }
         if ($EventId.Count -gt 0) { $finalParams.EventId = $EventId }
         if ($ExcludeEventId.Count -gt 0) { $finalParams.ExcludeEventId = $ExcludeEventId }
         if ($PSBoundParameters.ContainsKey('FolderPath')) { $finalParams.FolderPath = $FolderPath }
         if ($PSBoundParameters.ContainsKey('Export')) { $finalParams.Export = $Export }
+        if ($PSBoundParameters.ContainsKey('Aggressive')) { $finalParams.Aggressive = $Aggressive }
+        if ($PSBoundParameters.ContainsKey('OutputCSV')) { $finalParams.OutputCSV = $OutputCSV }
+        if ($PSBoundParameters.ContainsKey('MaxEvents')) { $finalParams.MaxEvents = $MaxEvents }
         
-        # Handle Aggressive parameter for Auto Level 3
-        if ($baselineAggressive) {
-            if ($PSBoundParameters.ContainsKey('Aggressive') -and ![string]::IsNullOrWhiteSpace($Aggressive)) {
-                $finalParams.Aggressive = $Aggressive  # User specified custom path
-            }
-            else {
-                $finalParams.Aggressive = ""  # Default aggressive search
-            }
-        }
-        elseif ($PSBoundParameters.ContainsKey('Aggressive')) {
-            $finalParams.Aggressive = $Aggressive  # User added aggressive search
-        }
-        
-        Write-Host "Baseline IOCs: $($script:GlobalLogIOCs.Count)" -ForegroundColor Green
+        Write-Host "Total IOCs: $($script:GlobalLogIOCs.Count)" -ForegroundColor Green
         if ($Search.Count -gt 0) {
             Write-Host "Additional User IOCs: $($Search.Count)" -ForegroundColor Green
         }
@@ -13321,7 +13692,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
 
     # Validate Aggressive parameter requires Search
     if ($PSBoundParameters.ContainsKey('Aggressive') -and $Search.Count -eq 0) {
-        throw "The -Aggressive parameter requires -IncludeStrings to be specified."
+        throw "The -Aggressive parameter requires -Search to be specified. Aggressive mode searches file systems for IOCs specified in -Search."
     }
 
     # Handle StopLogging switch
@@ -13683,221 +14054,6 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         }
         
         return
-    }
-
-    # Initialize timezone handling
-    $systemTimeZone = [System.TimeZoneInfo]::Local
-
-    # Function to get timezone info by name/abbreviation
-    function Get-TimezoneInfo {
-        param($TimezoneName)
-    
-        $TimezoneName = $TimezoneName.ToUpper()
-    
-        $timezoneMap = @{
-            'UTC' = 'UTC'
-            'GMT' = 'GMT Standard Time'
-            'EST' = 'Eastern Standard Time'
-            'CST' = 'Central Standard Time' 
-            'MST' = 'Mountain Standard Time'
-            'PST' = 'Pacific Standard Time'
-            'EDT' = 'Eastern Standard Time'
-            'CDT' = 'Central Standard Time'
-            'MDT' = 'Mountain Standard Time'
-            'PDT' = 'Pacific Standard Time'
-        }
-    
-        $mappedName = if ($timezoneMap.ContainsKey($TimezoneName)) { $timezoneMap[$TimezoneName] } else { $TimezoneName }
-    
-        try {
-            if ($mappedName -eq 'UTC') {
-                return [System.TimeZoneInfo]::Utc
-            }
-            return [System.TimeZoneInfo]::FindSystemTimeZoneById($mappedName)
-        }
-        catch {
-            Write-Warning "Invalid timezone '$TimezoneName', using system local time"
-            return $systemTimeZone
-        }
-    }
-
-    $targetTimeZone = if ([string]::IsNullOrWhiteSpace($Timezone)) { $systemTimeZone } else { Get-TimezoneInfo -TimezoneName $Timezone }
-
-    # Function to parse time strings - treats input as being in target timezone, converts to system time for queries
-    function ConvertTo-DateTime {
-        param($InputValue, $TargetTimeZone)
-    
-        $resultTime = $null
-    
-        try {
-            if ($InputValue -is [datetime]) {
-                $resultTime = $InputValue
-            }
-            elseif ($InputValue -is [string]) {
-                $InputValue = $InputValue.Trim()
-            
-                if ($InputValue.ToLower() -eq 'now') {
-                    $resultTime = Get-Date
-                }
-                elseif ($InputValue -match '^(\d+)([DHMdhm])$') {
-                    $number = [int]$matches[1]
-                    $unit = $matches[2].ToUpper()
-                
-                    $currentTime = Get-Date
-                    switch ($unit) {
-                        'D' { $resultTime = $currentTime.AddDays(-$number) }
-                        'H' { $resultTime = $currentTime.AddHours(-$number) }
-                        'M' { $resultTime = $currentTime.AddMinutes(-$number) }
-                    }
-                }
-                else {
-                    $resultTime = [datetime]$InputValue
-                }
-            }
-            else {
-                throw "Unsupported input type"
-            }
-        
-            # Convert from target timezone to system timezone for log queries
-            if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
-                $resultTime = [System.TimeZoneInfo]::ConvertTime(
-                    [DateTime]::SpecifyKind($resultTime, [DateTimeKind]::Unspecified),
-                    $TargetTimeZone,
-                    $systemTimeZone
-                )
-            }
-        
-            return $resultTime
-        }
-        catch {
-            throw "Invalid date format: $InputValue. Use datetime, 'now', or relative format like '7D', '24H', '30M'"
-        }
-    }
-
-    # Function to format datetime - converts from system time back to target timezone for display
-    function Format-DateTimeWithTimeZone {
-        param($DateTime, $TargetTimeZone)
-    
-        try {
-            $convertedTime = if ($TargetTimeZone.Id -eq $systemTimeZone.Id) {
-                $DateTime
-            }
-            else {
-                [System.TimeZoneInfo]::ConvertTime($DateTime, $systemTimeZone, $TargetTimeZone)
-            }
-        
-            $tzAbbrev = if ($TargetTimeZone.Id -eq 'UTC') { 
-                'UTC' 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Eastern*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'EDT' } else { 'EST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Central*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'CDT' } else { 'CST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Mountain*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'MDT' } else { 'MST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Pacific*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'PDT' } else { 'PST' } 
-            }
-            else { 
-                $TargetTimeZone.StandardName.Split(' ')[0] 
-            }
-        
-            return $convertedTime.ToString("yyyy-MM-dd HH:mm:ss") + " $tzAbbrev"
-        }
-        catch {
-            return $DateTime.ToString("yyyy-MM-dd HH:mm:ss")
-        }
-    }
-
-    $targetTimeZone = if ([string]::IsNullOrWhiteSpace($Timezone)) { $systemTimeZone } else { Get-TimezoneInfo -TimezoneName $Timezone }
-
-    # Function to parse time strings and convert to target timezone for search queries
-    function ConvertTo-DateTime {
-        param($InputValue, $TargetTimeZone)
-        
-        if ($InputValue -is [datetime]) {
-            # Convert to target timezone for internal processing, then back to system time for search
-            if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
-                $convertedTime = [System.TimeZoneInfo]::ConvertTime($InputValue, $TargetTimeZone, $systemTimeZone)
-                return $convertedTime
-            }
-            return $InputValue
-        }
-        
-        if ($InputValue -is [string]) {
-            $InputValue = $InputValue.Trim()
-            
-            if ($InputValue.ToLower() -eq 'now') {
-                return Get-Date
-            }
-            
-            if ($InputValue -match '^(\d+)([DHMdhm])$') {
-                $number = [int]$matches[1]
-                $unit = $matches[2].ToUpper()
-                
-                $currentTime = Get-Date
-                switch ($unit) {
-                    'D' { return $currentTime.AddDays(-$number) }
-                    'H' { return $currentTime.AddHours(-$number) }
-                    'M' { return $currentTime.AddMinutes(-$number) }
-                }
-            }
-            else {
-                try {
-                    $parsedDate = [datetime]$InputValue
-                    # If user specified a timezone, interpret the input date as being in that timezone
-                    if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
-                        # Convert from target timezone to system timezone for search
-                        $convertedTime = [System.TimeZoneInfo]::ConvertTime($parsedDate, $TargetTimeZone, $systemTimeZone)
-                        return $convertedTime
-                    }
-                    return $parsedDate
-                }
-                catch {
-                    throw "Invalid date format: $InputValue. Use datetime, 'now', or relative format like '1D', '4H', or '10m'"
-                }
-            }
-        }
-        
-        throw "Invalid date input: $InputValue"
-    }
-
-    # Function to format datetime with timezone for display
-    function Format-DateTimeWithTimeZone {
-        param($DateTime, $TargetTimeZone)
-        
-        # Convert from system time to target timezone for display
-        if ($TargetTimeZone.Id -eq $systemTimeZone.Id) {
-            $convertedTime = $DateTime
-            $tzAbbrev = $systemTimeZone.StandardName.Split(' ')[0]
-        }
-        else {
-            $convertedTime = [System.TimeZoneInfo]::ConvertTime($DateTime, $systemTimeZone, $TargetTimeZone)
-            
-            $tzAbbrev = if ($TargetTimeZone.Id -eq 'UTC') { 
-                'UTC' 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Eastern*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'EDT' } else { 'EST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Central*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'CDT' } else { 'CST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Mountain*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'MDT' } else { 'MST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Pacific*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'PDT' } else { 'PST' } 
-            }
-            else { 
-                $TargetTimeZone.StandardName.Split(' ')[0] 
-            }
-        }
-        
-        return $convertedTime.ToString("yyyy-MM-dd HH:mm:ss") + " $tzAbbrev"
     }
 
     # Handle default date logic - if no StartDate specified, get ALL logs
@@ -14471,7 +14627,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             throw "Aggressive search path does not exist: $searchPath"
         }
         
-        $aggressiveResults = Search-AggressiveLogFiles -SearchPath $searchPath -IncludeStrings $Search -MsgTruncateLength $msgTruncateLength
+        $aggressiveResults = Search-AggressiveLogFiles -SearchPath $searchPath -Search $Search -MsgTruncateLength $msgTruncateLength
     }
 
     Write-Progress -Activity "Initializing Hunt-Logs" -Status "Getting log list..." -PercentComplete 0
@@ -19251,8 +19407,7 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
         [int]$MaxPrint = 0,
     
         [Parameter(Mandatory = $false)]
-        [ValidateSet(1, 2, 3)]
-        [int]$Auto,
+        [switch]$Auto,
     
         [Parameter(Mandatory = $false)]
         [string]$Type = "",
