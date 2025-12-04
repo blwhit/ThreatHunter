@@ -22,15 +22,16 @@
 # - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... 
 # - Hunt-ForensicDump: Review CSV Output files for formatting/etc.
 # - Hunt-Logs: add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
-# - Hunt-Tasks: add path filtering/searching (param)
-# - Hunt-Tasks (i think): review logic for getting the hash of the executable vs the scriptFile
+
 
 #   Final/Full Review & To Do
 # --------------------------------------------
 # - Make Wiki
-# - Finalize suspicious/IOC string lists
 # - Review each funtion: Full description, Every parameter/feature/sub-function (with examples)
 # - Full review of usage and every parameter/feature audit
+
+# - Finalize suspicious/IOC string lists
+
 # - Rename and standardize any variable names (loadtool vs loadbrowsertool, etc.)
 # - Review and update all Synopsis/Parameters/Notes/Examples sections
 
@@ -20547,6 +20548,18 @@ function Hunt-Tasks {
     .PARAMETER Search
     Filter results using wildcard patterns. Searches across task names, paths, descriptions, 
     executables, arguments, and trigger types. Case-insensitive matching.
+
+    .PARAMETER Path
+    Filter tasks by their Task Path. Supports wildcard matching. Use "\" to show only root-level tasks.
+    Example: -Path "Microsoft" returns all tasks with "Microsoft" in the path.
+    Example: -Path "\" returns only root-level tasks (no subdirectories).
+
+    .PARAMETER StartDate
+    Filter tasks by creation or modification date. Accepts multiple formats:
+    - Relative: "7D" (days), "24H" (hours), "30M" (minutes)
+    - Absolute: "2024-01-01" or any valid datetime string
+    - Special: "now" for current time
+    Filters based on task file modified date, task file created date, or last run time.
     
     .PARAMETER IncludeDisabled  
     Include disabled tasks in the analysis. By default, disabled tasks are excluded.
@@ -20585,15 +20598,35 @@ function Hunt-Tasks {
     Hunt-Tasks -Search "*powershell*" -OutputCSV ".\ps_tasks.csv" -IncludeDisabled
     Find all PowerShell-related tasks (including disabled) and export to CSV.
 
+    .EXAMPLE
+    Hunt-Tasks -Path "Microsoft" -StartDate "7D"
+    Show all tasks in Microsoft-related paths modified/created in the last 7 days.
+
+    .EXAMPLE
+    Hunt-Tasks -Path "\" -Quiet -PassThru
+    Get only root-level tasks as PowerShell objects without console output.
+
+    .EXAMPLE
+    Hunt-Tasks -StartDate "2024-12-01" -Search "*update*"
+    Find tasks containing "update" that were modified/created after December 1, 2024.
+
     .NOTES
     Requirements: PowerShell 5.0+, Windows
     Privileges: Administrator recommended for complete task enumeration
     Output: Displays forensic analysis or returns PSCustomObjects via -PassThru
+    Date Filtering: Uses task file modified date (priority), created date, or last run time
+    Path Filtering: Use "\" for root-level only, or wildcards like "*Microsoft*" for pattern matching
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
         [string]$Search = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$Path = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$StartDate = "",
 
         [Parameter(Mandatory = $false)]
         [switch]$IncludeDisabled,
@@ -20615,12 +20648,50 @@ function Hunt-Tasks {
             Write-Warning "Not running as Administrator, insufficient privileges may cause detection issues..."
         }
         Write-Verbose "[INFO]: Starting scheduled task enumeration..."
+        
         # Progress tracking
         $script:TotalTasks = 0
         $script:ProcessedTasks = 0
-        
-        # Add this in the begin block after existing helper functions
         $script:TaskResults = @()
+
+        # Helper function to convert date input to DateTime
+        function ConvertTo-DateTime {
+            param($InputValue)
+        
+            if ($InputValue -is [datetime]) {
+                return $InputValue
+            }
+        
+            if ($InputValue -is [string]) {
+                $InputValue = $InputValue.Trim()
+            
+                if ($InputValue.ToLower() -eq 'now') {
+                    return Get-Date
+                }
+            
+                if ($InputValue -match '^(\d+)([DHMdhm])$') {
+                    $number = [int]$matches[1]
+                    $unit = $matches[2].ToUpper()
+                
+                    $currentTime = Get-Date
+                    switch ($unit) {
+                        'D' { return $currentTime.AddDays(-$number) }
+                        'H' { return $currentTime.AddHours(-$number) }
+                        'M' { return $currentTime.AddMinutes(-$number) }
+                    }
+                }
+                else {
+                    try {
+                        return [datetime]$InputValue
+                    }
+                    catch {
+                        throw "Invalid date format: $InputValue. Use datetime, 'now', or relative format like '7D', '24H', or '30M'"
+                    }
+                }
+            }
+        
+            throw "Invalid date input: $InputValue"
+        }
 
         # Helper function to create task result object
         function New-TaskResult {
@@ -21033,6 +21104,34 @@ function Hunt-Tasks {
             if (-not $IncludeDisabled) {
                 $tasks = $tasks | Where-Object { $_.State -ne 'Disabled' }
             }
+
+            # Apply Path filter if specified
+            if (-not [string]::IsNullOrWhiteSpace($Path)) {
+                if ($Path -eq '\') {
+                    # Special case: root folder only (no subdirectories)
+                    $tasks = $tasks | Where-Object { $_.TaskPath -eq '\' }
+                    Write-Verbose "[INFO]: Filtering for root-level tasks only"
+                }
+                else {
+                    # Wildcard matching on task path
+                    $pathPattern = if ($Path -notlike '*`**' -and $Path -notlike '*`?*') { "*$Path*" } else { $Path }
+                    $tasks = $tasks | Where-Object { $_.TaskPath -like $pathPattern }
+                    Write-Verbose "[INFO]: Filtering tasks by path pattern: $pathPattern"
+                }
+            }
+
+            # Parse StartDate filter if specified
+            $startDateFilter = $null
+            if (-not [string]::IsNullOrWhiteSpace($StartDate)) {
+                try {
+                    $startDateFilter = ConvertTo-DateTime -InputValue $StartDate
+                    Write-Verbose "[INFO]: Filtering tasks modified/created after: $($startDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
+                }
+                catch {
+                    Write-Warning "Invalid StartDate format: $StartDate. Ignoring date filter."
+                    Write-Verbose "[ERROR]: $($_.Exception.Message)"
+                }
+            }
             
             # Sort tasks by task file modification date, then executable modification date
             $sortedTasks = $tasks | Sort-Object {
@@ -21094,6 +21193,34 @@ function Hunt-Tasks {
                     catch {
                         # Continue without task info if it fails
                     }
+
+                    # Apply StartDate filter if specified
+                    if ($null -ne $startDateFilter) {
+                        $taskDate = $null
+                        
+                        # Priority 1: Task file modified date
+                        if ($taskFileDetails.Modified -is [DateTime]) {
+                            $taskDate = $taskFileDetails.Modified
+                        }
+                        # Priority 2: Task file created date
+                        elseif ($taskFileDetails.Created -is [DateTime]) {
+                            $taskDate = $taskFileDetails.Created
+                        }
+                        # Priority 3: Last run time
+                        elseif ($taskInfo -and $taskInfo.LastRunTime -and $taskInfo.LastRunTime -ne [DateTime]::MinValue) {
+                            $taskDate = $taskInfo.LastRunTime
+                        }
+                        
+                        # Skip task if it's older than the filter date
+                        if ($null -ne $taskDate -and $taskDate -lt $startDateFilter) {
+                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - date $($taskDate.ToString('yyyy-MM-dd HH:mm:ss')) is before filter date"
+                            continue
+                        }
+                        elseif ($null -eq $taskDate) {
+                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - no valid date found for comparison"
+                            continue
+                        }
+                    }
                     
                     # Validate task has actions
                     if (-not $task.Actions -or $task.Actions.Count -eq 0) {
@@ -21119,13 +21246,32 @@ function Hunt-Tasks {
                             $scriptFile = $null
                             $scriptFileDetails = $null
                             
-                            if ($null -ne $arguments) {
-                                $fullCommandLine = "$executable $arguments"
-                                $extractedFile = Get-FileFromCommandLine -CommandLine $fullCommandLine
-                                
-                                if ($extractedFile -and $extractedFile -ne $resolvedExecutable) {
-                                    $scriptFile = $extractedFile
-                                    $scriptFileDetails = Get-FileDetails -FilePath $scriptFile
+                            if ($null -ne $arguments -and -not [string]::IsNullOrWhiteSpace($arguments)) {
+                                try {
+                                    $fullCommandLine = "$executable $arguments"
+                                    $extractedFile = Get-FileFromCommandLine -CommandLine $fullCommandLine
+                                    
+                                    # Only treat as script file if it's different from executable AND has valid file extension
+                                    if ($extractedFile -and 
+                                        $extractedFile -ne $resolvedExecutable -and
+                                        $extractedFile -match '\.(ps1|vbs|js|bat|cmd|py|rb|pl)$') {
+                                        
+                                        # Expand environment variables in extracted path
+                                        $scriptFile = [Environment]::ExpandEnvironmentVariables($extractedFile)
+                                        
+                                        # Verify it's actually a file path and not just an argument
+                                        if (Test-ValidWindowsPath $scriptFile) {
+                                            $scriptFileDetails = Get-FileDetails -FilePath $scriptFile
+                                        }
+                                        else {
+                                            $scriptFile = $null
+                                        }
+                                    }
+                                }
+                                catch {
+                                    Write-Verbose "Error extracting script file from command line: $($_.Exception.Message)"
+                                    $scriptFile = $null
+                                    $scriptFileDetails = $null
                                 }
                             }
                             
@@ -21487,6 +21633,12 @@ function Hunt-Tasks {
             Write-Verbose "[INFO]: Enumerated $taskCount tasks with $matchCount actions."
             if ($Search) {
                 Write-Verbose "[INFO]: Search filter applied: '$Search'" 
+            }
+            if ($Path) {
+                Write-Verbose "[INFO]: Path filter applied: '$Path'"
+            }
+            if ($startDateFilter) {
+                Write-Verbose "[INFO]: StartDate filter applied: $($startDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
             }
             if (-not $IncludeDisabled) {
                 Write-Verbose "[INFO]: Disabled tasks excluded." 
