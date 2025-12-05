@@ -247,152 +247,120 @@ $script:PossibleTLDs = @(
 
 # Hunt Logs
 $script:GlobalLogIOCs = @(
-    # Custom - Default computer names
+    # Default computer names
     "WIN-*", "DESKTOP-*", "LAPTOP-*", 
-    "WORKGROUP\\WIN-*", "WORKGROUP\\DESKTOP-*",
+    "WORKGROUP\\WIN-", "WORKGROUP\\DESKTOP-",
     
-    # Credential Dumping & Access
-    "mimikatz", "sekurlsa", "lsadump", "logonpasswords", "privilege::debug",
-    "kerberos::golden", "kerberos::silver", "kerberos::ptt", "kerberos::list",
-    "lsass.exe", "lsass.dmp", "lsass_", "dumpert", "procdump", "sqldumper",
-    "comsvcs.dll,MiniDump", "comsvcs.dll,#24", "MiniDumpWriteDump",
-    "ntds.dit", "SYSTEM.hiv", "SAM.hiv", "SECURITY.hiv",
-    "reg save HKLM\\SAM", "reg save HKLM\\SYSTEM", "reg save HKLM\\SECURITY",
-    "vssadmin create shadow", "copy \\\\?\\GLOBALROOT", "esentutl",
-    "pypykatz", "lazagne", "mimipenguin", "nanodump", "eviltwin",
+    # Credential access artifacts
+    "lsass.dmp", "lsass_", 
+    "ntds.dit", ".hiv",
+    "reg save HKLM\\SA", "reg save HKLM\\SYSTEM", "reg save HKLM\\SECURITY",
+    "vssadmin create shadow", "copy \\\\?\\GLOBALROOT",
+    "comsvcs.dll,MiniDump", "comsvcs.dll,#24",
     
-    # Kerberos Attacks
-    "kerberoast", "asreproast", "rubeus", "getTGT", "asktgt", "asktgs",
-    "RC4_HMAC_MD5", "kirbi", "klist", "tgtdeleg",
-    "DES_CBC_MD5", "S4U2Self", "S4U2Proxy", "constrained delegation",
-    "unconstrained delegation", "resource-based constrained",
+    # Kerberos patterns
+    "RC4_HMAC_MD5", "DES_CBC_MD5", ".kirbi",
+    "S4U2Self", "S4U2Proxy",
     
-    # Active Directory Attacks
-    "dcsync", "zerologon", "printnightmare", "petitpotam", "samaccountname",
-    "nopac", "certifried", "shadow credentials", "msDS-KeyCredentialLink",
-    "bloodhound", "sharphound", "azurehound", "invoke-bloodhound",
-    "adexplorer", "adfind", "ldapsearch", "dsquery", "nltest",
-    "powerview", "Get-Domain", "Get-NetUser", "Get-NetGroup", "Get-NetComputer",
-    "Invoke-ShareFinder", "Invoke-UserHunter", "Find-LocalAdminAccess",
+    # Network shares
+    "ADMIN$", "C$", "IPC$",
+    "\\\\127.0.0.1\\C$", "\\\\localhost\\ADMIN$",
     
-    # Lateral Movement
-    "psexec", "psexesvc", "paexec", "remcom", "ADMIN$", "C$", "IPC$",
-    "wmiexec", "wmic process call create", "Win32_Process",
-    "smbexec", "atexec", "at.exe", "schtasks", "sc.exe",
-    "winrm", "winrs", "Invoke-Command", "Enter-PSSession", "New-PSSession",
-    "dcomexec", "MMC20.Application", "ShellWindows", "ShellBrowserWindow",
-    "\\\\127.0.0.1\\", "\\\\localhost\\", "\\\\127.0.0.1\\C$", "\\\\localhost\\ADMIN$",
-    "pass-the-hash", "pass-the-ticket",
-    
-    # PowerShell Abuse
-    "-EncodedCommand", "-enc ", "-e ", "-ec ", "FromBase64String",
+    # PowerShell execution flags & download cradles
+    "-EncodedCommand", "-enc ", "powershell.exe -e ", "-ec ",
     "-ExecutionPolicy Bypass", "-ep bypass", "-ex bypass",
-    "-WindowStyle Hidden", "-w hidden", "-window hidden",
-    "-NoProfile", "-nop", "-NonInteractive", "-noni",
-    "IEX*", "Invoke-Expression", "iex*New-Object", "DownloadString",
-    "Net.WebClient", "System.Net.WebClient", "Invoke-WebRequest",
-    "Invoke-RestMethod", "Start-BitsTransfer", "bitstransfer",
-    "Invoke-Mimikatz", "Invoke-Kerberoast", "Invoke-Rubeus",
-    "PowerSploit", "PowerUp", "PowerView", "Nishang", "Invoke-Obfuscation",
-    "Invoke-CradleCrafter", "Invoke-PSImage", "Out-EncryptedScript",
-    "Reflection.Assembly", "System.Reflection.Assembly::Load",
-    "Runtime.InteropServices", "VirtualAlloc", "WriteProcessMemory",
-    "CreateThread", "WaitForSingleObject", "System.Management.Automation.AmsiUtils",
+    "-WindowStyle Hidden", "-w hidden", "-wi h",
+    "-NoProfile", "-nop",
+    "-NonInteractive", "-noni",
+    "-NoLogo", "-NoExit",
+    "FromBase64String", "ToBase64String",
+    "DownloadString", "DownloadFile", "DownloadData",
+    "WebClient",
+    "Invoke-WebRequest", "Invoke-RestMethod",
+    "Start-BitsTransfer",
+    "Invoke-Expression", "IEX ",
+    "ServerCertificateValidationCallback",
     
-    # LOLBins & Living Off the Land
+    # LOLBin command patterns
     "certutil -decode", "certutil -urlcache", "certutil.exe -f",
-    "bitsadmin /transfer", "bitsadmin /create", "bitsadmin /addfile",
-    "mshta.exe http", "mshta.exe javascript", "mshta vbscript",
-    "rundll32.exe javascript", "rundll32.exe http", "rundll32.exe C:\\\\Users",
-    "regsvr32 /s /u /i:http", "regsvr32.exe /s /n /u",
+    "bitsadmin /transfer", "bitsadmin /create",
+    "mshta.exe http", "mshta.exe javascript",
+    "rundll32.exe javascript", "rundll32.exe http",
+    "regsvr32 /s /u /i:http",
     "msiexec /quiet /i http", "msiexec.exe /q /i",
-    "wmic process call create", "wmic /node:", "wmic shadowcopy",
+    "wmic process call create", "wmic shadowcopy",
     "installutil.exe /logfile=", "installutil.exe /U",
-    "regasm.exe /U", "regsvcs.exe /U",
-    "msbuild.exe", "csc.exe", "jsc.exe", "vbc.exe",
-    "cmstp.exe /s", "odbcconf.exe /S /A",
-    "forfiles /p c:\\\\windows\\\\system32 /m cmd.exe /c",
-    "pcalua.exe -a", "SyncAppvPublishingServer.exe",
-    "mavinject.exe", "dfsvc.exe", "ieexec.exe", "xwizard.exe",
+    "forfiles /p c:\\windows\\system32 /m cmd.exe /c",
+    "pcalua.exe -a",
     
-    # Defense Evasion
-    "amsi", "AmsiScanBuffer", "AmsiInitFailed", "amsiInitFailed",
-    "ETW", "EtwEventWrite", "Event Tracing for Windows",
-    "Set-MpPreference -DisableRealtimeMonitoring", "Set-MpPreference -DisableIOAVProtection",
-    "Add-MpPreference -ExclusionPath", "Add-MpPreference -ExclusionExtension",
-    "Uninstall-WindowsFeature", "Disable-WindowsOptionalFeature",
-    "sc.exe stop", "net stop", "taskkill /F /IM",
+    # Defender tampering
+    "Set-MpPreference -Disable",
+    "Add-MpPreference -Exclusion",
+    "stop windefend",
     "powershell.exe -version 2", "powershell -v 2",
-    "AppLocker", "SRP", "WDAC", "constrained language mode",
-    "Bypass", "Unhook", "Patch", "Inline", "Detour",
-    "Process Hollowing", "Process Doppelganging", "Process Herpaderping",
-    "Reflective DLL", "reflective PE", "DLL Injection", "Thread Injection",
-    "CreateRemoteThread", "QueueUserAPC", "SetWindowsHookEx", "RtlCreateUserThread",
-    "NtMapViewOfSection", "NtQueueApcThread", "NtCreateThreadEx",
     
-    # Persistence
-    "schtasks /create", "New-ScheduledTask", "Register-ScheduledTask",
-    "reg add HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
-    "reg add HKLM\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
-    "wmic /NAMESPACE:", "ActiveScriptEventConsumer", "__EventFilter",
-    "CommandLineEventConsumer", "__FilterToConsumerBinding",
-    "DLL Search Order Hijacking", "COM Hijacking", "Accessibility Features",
-    "Sticky Keys", "sethc.exe", "utilman.exe", "osk.exe", "magnify.exe",
-    "AppInit_DLLs", "Image File Execution Options", "Debugger",
-    "Winlogon\\\\Shell", "Winlogon\\\\Userinit", "Winlogon\\\\Notify",
-    "netsh advfirewall", "New-NetFirewallRule", "netsh wlan",
+    # Persistence mechanisms
+    "schtasks /create",
+    "reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "ActiveScriptEventConsumer", "__EventFilter",
+    "CommandLineEventConsumer",
+    "sethc.exe", "utilman.exe",
+    "AppInit_DLLs",
+    "Image File Execution Options",
+    "Winlogon\\Shell", "Winlogon\\Userinit",
     
-    # Reconnaissance
-    "net user /domain", "net group /domain", "net localgroup administrators",
-    "nltest /dclist", "nltest /domain_trusts", "nltest /all_trusts",
-    "dsquery", "csvde", "ldifde", "gpresult",
-    "Get-ADUser", "Get-ADGroup", "Get-ADComputer", "Get-ADDomain",
-    "whoami /all", "whoami /priv", "quser", "query user",
-    "tasklist", "netstat -ano", "ipconfig /all", "route print",
-    "arp -a", "net view", "net share", "net session",
-    "systeminfo", "wmic qfe", "wmic product", "wmic service",
+    # Reconnaissance - Network enumeration
+    "net user", "net user /domain",
+    "net group", "net group /domain", 
+    "domain admins", "enterprise admins",
+    "net localgroup", 
+    "net accounts", "net view", "net share", "net session",
+    "net config", "net time /domain", "net use",
     
-    # Exfiltration & Data Staging
-    "7z.exe a -p", "rar.exe a -hp", "zip -e", "tar -czf",
-    "xcopy /s /e /h", "robocopy", "copy \\\\\\\\", "move \\\\\\\\",
-    "rclone", "megasync", "mega-cmd", "dropbox",
-    "Compress-Archive", "System.IO.Compression",
-    "ftps://", "sftp://", "scp ", "rsync ",
-    "pastebin.com", "paste.ee", "hastebin", "ghostbin",
-    "transfer.sh", "anonfiles.com", "gofile.io", "file.io",
+    # Reconnaissance - AD/Domain queries
+    "nltest /dc", "nltest /domain_trusts", "nltest /dsgetdc",
+    "dsquery", "gpresult",
+    
+    # Reconnaissance - System information
+    "whoami /", 
+    "systeminfo", "ipconfig /all", "ipconfig /displaydns",
+    "netstat -an", "route print", "arp -a",
+    "tasklist", "quser", "query user", "qwinsta",
+    "wmic qfe", "wmic product", "wmic service", "wmic process",
+    "wmic startup", "wmic useraccount", "wmic group",
+    "wmic netuse", "wmic share",
+    "Get-NetIP", "Get-NetAdapter", "Get-DnsClientCache",
+    
+    # Reconnaissance - PowerShell AD cmdlets
+    "Get-ADUser", "Get-ADGroup", 
+    "Get-ADComputer", "Get-ADDomain", 
+    "Get-ADForest", "Get-ADObject", "Get-ADOrganizational",
+    
+    # Data staging
+    "7z.exe a -p", "rar.exe a -hp", "Compress-Archive",
+    
+    # Remote access/tunneling
+    "ssh -R", "ssh -L", "ssh -D",
+    "ngrok", "cloudflared",
+    "socks4", "socks5",
+    
+    # Exfiltration services
+    "pastebin.com", "paste.ee",
     "discord.com/api/webhooks", "webhook.site",
     
-    # Network & Tunneling
-    "ngrok", "cloudflared", "serveo", "localhost.run", "pagekite",
-    "ssh -R", "ssh -L", "ssh -D", "plink.exe",
-    "chisel", "ligolo", "revsocks", "rpivot",
-    "socks", "socks4", "socks5", "proxy", "proxychains",
-    "socat", "netcat", "nc.exe", "nc64.exe", "ncat.exe",
-    "dnscat", "iodine", "dns2tcp", "icmptunnel",
-    "tor.exe", ".onion", "torsocks", "i2p",
+    # Suspicious paths
+    "C:\\Users\\Public\\", "C:\\ProgramData\\", "C:\\Windows\\Temp\\",
+    "%TEMP%\\", "%TMP%\\",
     
-    # Web Shells & Remote Access
-    "webshell", "aspx", "cmd.aspx", "shell.php", "c99.php",
-    "eval*", "eval*base64_decode",
-    "?php system*", "passthru*", "shell_exec*",
-    "TeamViewer.exe", "AnyDesk.exe", "vnc", "rdp", "mstsc.exe",
-    "ScreenConnect", "RemotePC", "LogMeIn", "GoToMyPC",
-    
-    # Suspicious Downloads & Scripts
-    "http://", "https://", "ftp://", "\\\\\\\\\\\\", "//",
-    ".ps1", ".bat", ".cmd", ".vbs", ".js", ".wsf", ".hta",
-    ".exe", ".dll", ".scr", ".com", ".pif",
-    "download", "wget", "curl", "Invoke-WebRequest", "iwr",
-    "C:\\\\Users\\\\Public", "C:\\\\ProgramData", "C:\\\\Windows\\\\Temp",
-    "C:\\\\Users\\\\*\\\\AppData\\\\Local\\\\Temp", "C:\\\\Users\\\\*\\\\Downloads",
-    "%TEMP%", "%TMP%", "%APPDATA%", "%LOCALAPPDATA%",
-    
-    # Obfuscation Indicators
-    "base64", "FromBase64", "ToBase64", "Convert::FromBase64String",
-    "gzip", "deflate", "compress", "decompress",
-    "xor", "rot13", "caesar", "reverse",
-    "char*", "chr*", "-join", "-split", "-replace",
-    "randomize", "obfuscate", "encode", "decode"
+    # Obfuscation & encoding
+    "[Convert]::FromBase64", "[Convert]::ToBase64",
+    "[Text.Encoding]::",
+    "-join", "-replace", "-split",
+    "[char", "[int[]]",
+    ".replace(", ".substring(", "[array]::Reverse",
+    "IO.Compression", "IO.MemoryStream",
+    "Reflection.Assembly", "Assembly.Load", "::Load("
 )
 
 
@@ -12724,9 +12692,17 @@ Default: If StartDate specified without EndDate, defaults to 'Now' (current time
 Note: Cannot specify EndDate without StartDate
 
 .PARAMETER Search
-Array of strings to search for in event messages and XML data. Case-insensitive wildcard matching.
+Array of strings to search for in event messages. Case-insensitive pattern matching.
 TAKES PRECEDENCE over -Exclude when specified. Any event matching a Search string will be included even if it matches Exclude strings.
-Note: Supports wildcards (* and ?). To search for literal special characters, they must be escaped: `` ` * `` ` ? `` ` [ `` ` ]
+Note: By default, only searches message text. Use -SearchXML to also search XML event data.
+Special characters are automatically escaped for safe matching.
+
+.PARAMETER SearchXML
+Enables searching in formatted XML event data in addition to message text. Requires -Search parameter.
+XML is searched in the same format as displayed (e.g., search "ProcessID: 10468" to find that value in XML).
+Matched strings in XML will be highlighted in red when displayed.
+WARNING: Searching XML significantly impacts performance. Only use when IOCs are known to appear in XML fields.
+Default: Disabled (searches messages only for better performance)
 
 .PARAMETER Exclude  
 Array of strings to exclude from results. Events containing these strings are filtered out.
@@ -12867,6 +12843,10 @@ Stops event logging and configures preservation mode during active incident.
 Hunt-Logs -ClearCache
 Clears the event log cache. Use when switching between sessions or if cache behavior seems incorrect.
 
+.EXAMPLE
+Hunt-Logs -StartDate "7D" -Search "mimikatz" -SearchXML -OutputCSV "C:\Hunt\"
+Searches last 7 days for "mimikatz" in both message AND XML data (slower but more thorough).
+
 .NOTES
 Version: 2.1
 Requires: PowerShell 5.0+
@@ -12877,8 +12857,8 @@ Caching: Event log results are automatically cached in the PowerShell session fo
          - Cache automatically supplements itself when queries extend beyond cached time ranges
          - Use -ClearCache to manually clear the cache if needed
          - Cache is invalidated when switching between Live/EVTX modes or changing timezones
-Special Characters: Search uses PowerShell -like operator. Wildcards: * (any chars), ? (single char)
-                    To search literal *, ?, [, ] characters, escape with backtick: `*
+Special Characters: Search uses regex pattern matching. All special characters are automatically escaped.
+                    Very short strings (1-2 chars) may cause false positives - use longer, specific patterns.
 Time Ranges: Invalid date inputs will throw descriptive errors. Relative times calculated from current time.
 Search Priority: -Search takes precedence over -Exclude. -ExcludeEventId takes precedence over everything.
 Default Behavior: Without date parameters, retrieves ALL available logs with no time filtering.
@@ -12892,6 +12872,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         [string[]]$Search = @(),
         [Parameter(Mandatory = $false)]
         [string[]]$Exclude = @(),
+        [Parameter(Mandatory = $false)]
+        [switch]$SearchXML,
         [Parameter(Mandatory = $false)]
         [int[]]$EventId = @(),
         [Parameter(Mandatory = $false)]
@@ -12932,58 +12914,83 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     )
 
     # ============================================================================
+    # PERFORMANCE: Initialize regex cache for large IOC lists
+    # ============================================================================
+    
+    # Cache regex patterns to avoid rebuilding them for each event
+    $script:CachedSearchRegex = $null
+    $script:CachedSearchStrings = $null
+    $script:CachedExcludeRegex = $null
+    $script:CachedExcludeStrings = $null
+    
+    # ============================================================================
+    # DEFENSIVE VALIDATION
+    # ============================================================================
+
+    # ============================================================================
     # DEFENSIVE VALIDATION
     # ============================================================================
     
-    # Validate and sanitize Search strings for -like operator compatibility
+    # Helper function to sanitize search/exclude strings for regex compatibility
+    function Get-SanitizedSearchString {
+        param([string]$InputString)
+        
+        if ([string]::IsNullOrWhiteSpace($InputString)) {
+            return $null
+        }
+        
+        # No sanitization needed - regex.Escape handles everything
+        # Just return trimmed string
+        return $InputString.Trim()
+    }
+    
+    # Validate and sanitize Search strings
     if ($Search.Count -gt 0) {
         $sanitizedSearch = @()
+        $shortStringCount = 0
         foreach ($searchStr in $Search) {
-            if ([string]::IsNullOrWhiteSpace($searchStr)) {
-                continue
-            }
-            
-            # Auto-escape problematic characters for -like operator
-            $cleanStr = $searchStr
-            
-            # Remove or escape regex-specific characters that don't work with -like
-            # Square brackets: PowerShell -like uses these for character classes, escape them
-            if ($cleanStr -match '[\[\]]') {
-                $cleanStr = $cleanStr -replace '\[', '`[' -replace '\]', '`]'
-                Write-Verbose "Auto-escaped brackets in search string: '$searchStr' -> '$cleanStr'"
-            }
-            
-            # Remove regex anchors (^ $) - not valid in -like
-            if ($cleanStr -match '[\^\$]') {
-                $cleanStr = $cleanStr -replace '[\^\$]', ''
-                Write-Verbose "Removed regex anchors from search string: '$searchStr' -> '$cleanStr'"
-            }
-            
-            # Remove regex quantifiers that don't match wildcards (+ . {})
-            if ($cleanStr -match '[+.{}]') {
-                $cleanStr = $cleanStr -replace '[+.{}]', '*'
-                Write-Verbose "Converted regex quantifiers to wildcards: '$searchStr' -> '$cleanStr'"
-            }
-            
-            # Remove pipe characters (regex OR) - not valid in -like
-            if ($cleanStr -match '\|') {
-                $cleanStr = $cleanStr -replace '\|', ''
-                Write-Verbose "Removed pipe characters from search string: '$searchStr' -> '$cleanStr'"
-            }
-            
-            # Validate final string isn't empty after sanitization
-            if (![string]::IsNullOrWhiteSpace($cleanStr)) {
+            $cleanStr = Get-SanitizedSearchString -InputString $searchStr
+            if ($null -ne $cleanStr) {
+                # Warn about very short strings (high false positive rate)
+                if ($cleanStr.Length -le 2) {
+                    $shortStringCount++
+                    Write-Verbose "Warning: Very short search string '$cleanStr' may cause false positives"
+                }
                 $sanitizedSearch += $cleanStr
             }
         }
-        $Search = $sanitizedSearch
+        
+        if ($shortStringCount -gt 0 -and -not $Quiet) {
+            Write-Warning "Detected $shortStringCount search string(s) with 2 or fewer characters. This may cause false positives. Consider using longer, more specific strings."
+        }
+        
+        if ($sanitizedSearch.Count -eq 0) {
+            Write-Warning "All Search strings were empty after sanitization. Search filter disabled."
+            $Search = @()
+        }
+        else {
+            $Search = $sanitizedSearch
+            Write-Verbose "Sanitized $($Search.Count) search string(s)"
+        }
     }
     
-    # Validate Exclude strings
+    # Validate and sanitize Exclude strings
     if ($Exclude.Count -gt 0) {
-        $Exclude = $Exclude | Where-Object { ![string]::IsNullOrWhiteSpace($_) }
-        if ($Exclude.Count -eq 0) {
-            Write-Warning "All Exclude strings were empty. Exclude filter disabled."
+        $sanitizedExclude = @()
+        foreach ($excludeStr in $Exclude) {
+            $cleanStr = Get-SanitizedSearchString -InputString $excludeStr
+            if ($null -ne $cleanStr) {
+                $sanitizedExclude += $cleanStr
+            }
+        }
+        
+        if ($sanitizedExclude.Count -eq 0) {
+            Write-Warning "All Exclude strings were empty after sanitization. Exclude filter disabled."
+            $Exclude = @()
+        }
+        else {
+            $Exclude = $sanitizedExclude
+            Write-Verbose "Sanitized $($Exclude.Count) exclude string(s)"
         }
     }
     
@@ -13007,6 +13014,10 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     # Validate parameter combinations
     if ($PSBoundParameters.ContainsKey('Aggressive') -and $Search.Count -eq 0) {
         throw "The -Aggressive parameter requires -Search to be specified. Aggressive mode searches file systems for IOCs specified in -Search."
+    }
+    
+    if ($SearchXML -and $Search.Count -eq 0) {
+        throw "The -SearchXML parameter requires -Search to be specified. SearchXML searches XML event data in addition to messages."
     }
     
     if ($Quiet -and -not $PassThru -and -not $PSBoundParameters.ContainsKey('OutputCSV')) {
@@ -14090,17 +14101,55 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         $msgTruncateLength = -1
     }
 
-    # Function to format XML
+    # Function to sanitize CSV data for Excel compatibility
+    function Format-CSVValue {
+        param($Value)
+    
+        if ($null -eq $Value -or $Value -eq "") {
+            return ""
+        }
+    
+        $stringValue = $Value.ToString()
+    
+        # Remove or escape problematic characters
+        $stringValue = $stringValue -replace '[\r\n]+', ' ' # Replace newlines with spaces
+        $stringValue = $stringValue -replace '\t', ' '      # Replace tabs with spaces
+        $stringValue = $stringValue -replace '"', '""'      # Escape quotes for CSV
+    
+        # Sanitize formula triggers for Excel security
+        if ($stringValue -match '^[=@+\-]') {
+            $stringValue = "'" + $stringValue
+        }
+    
+        # Truncate if too long for Excel (32,767 character limit per cell)
+        if ($stringValue.Length -gt 32760) {
+            $stringValue = $stringValue.Substring(0, 32760) + "..."
+        }
+    
+        return $stringValue
+    }
+
+    # Function to format XML - MUST BE DEFINED BEFORE Test-EventMatches
     function Format-EventXml {
         param($XmlString, $TruncateLength)
         
         try {
-            if ([string]::IsNullOrWhiteSpace($XmlString)) { return "[No XML Data]" }
+            Write-Host "[DEBUG Format-EventXml] Called - TruncateLength: $TruncateLength, Input length: $($XmlString.Length)" -ForegroundColor Magenta
             
-            if ($TruncateLength -eq 0) { return "[XML Display Disabled]" }
+            if ([string]::IsNullOrWhiteSpace($XmlString)) { 
+                Write-Host "[DEBUG Format-EventXml] Input is NULL/EMPTY - returning placeholder" -ForegroundColor Red
+                return "[No XML Data]" 
+            }
             
+            if ($TruncateLength -eq 0) { 
+                Write-Host "[DEBUG Format-EventXml] TruncateLength is 0 - returning disabled message" -ForegroundColor Yellow
+                return "[XML Display Disabled]" 
+            }
+            
+            Write-Host "[DEBUG Format-EventXml] Parsing XML document..." -ForegroundColor Cyan
             $xmlDoc = [xml]$XmlString
             $outputLines = @()
+            Write-Host "[DEBUG Format-EventXml] Parse successful, Event.System exists: $($null -ne $xmlDoc.Event.System)" -ForegroundColor Cyan
             
             if ($xmlDoc.Event.System) {
                 $system = $xmlDoc.Event.System
@@ -14152,126 +14201,193 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             }
             
             $result = ($outputLines -join "`n")
+            Write-Host "[DEBUG Format-EventXml] Created $($outputLines.Count) lines, joined length: $($result.Length)" -ForegroundColor Cyan
+            Write-Host "[DEBUG Format-EventXml] Result first 100 chars: $($result.Substring(0, [Math]::Min(100, $result.Length)))" -ForegroundColor Cyan
             
             if ($TruncateLength -gt 0 -and $result.Length -gt $TruncateLength) {
-                $result = $result.Substring(0, $TruncateLength) + "..."
+                $truncateLen = [Math]::Max(0, [Math]::Min($TruncateLength, $result.Length))
+                if ($truncateLen -gt 0) {
+                    $result = $result.Substring(0, $truncateLen) + "..."
+                    Write-Host "[DEBUG Format-EventXml] Truncated to $truncateLen characters" -ForegroundColor Yellow
+                }
             }
             
+            Write-Host "[DEBUG Format-EventXml] RETURNING - Final length: $($result.Length)" -ForegroundColor Green
             return $result
             
         }
         catch {
+            Write-Host "[DEBUG Format-EventXml] CATCH EXCEPTION: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[DEBUG Format-EventXml] Exception at line: $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
             $rawResult = "  [XML Parse Error] Raw: $XmlString"
             if ($TruncateLength -gt 0 -and $rawResult.Length -gt $TruncateLength) {
-                $rawResult = $rawResult.Substring(0, $TruncateLength) + "..."
+                $truncateLen = [Math]::Max(0, [Math]::Min($TruncateLength, $rawResult.Length))
+                if ($truncateLen -gt 0) {
+                    $rawResult = $rawResult.Substring(0, $truncateLen) + "..."
+                }
             }
             return $rawResult
         }
     }
 
-
-    # Function to sanitize CSV data for Excel compatibility
-    function Format-CSVValue {
-        param($Value)
-    
-        if ($null -eq $Value -or $Value -eq "") {
-            return ""
-        }
-    
-        $stringValue = $Value.ToString()
-    
-        # Remove or escape problematic characters
-        $stringValue = $stringValue -replace '[\r\n]+', ' ' # Replace newlines with spaces
-        $stringValue = $stringValue -replace '\t', ' '      # Replace tabs with spaces
-        $stringValue = $stringValue -replace '"', '""'      # Escape quotes for CSV
-    
-        # Sanitize formula triggers for Excel security
-        if ($stringValue -match '^[=@+\-]') {
-            $stringValue = "'" + $stringValue
-        }
-    
-        # Truncate if too long for Excel (32,767 character limit per cell)
-        if ($stringValue.Length -gt 32760) {
-            $stringValue = $stringValue.Substring(0, 32760) + "..."
-        }
-    
-        return $stringValue
-    }
-
-
     # Function to test if strings match - Search takes precedence over Exclude
-    # PERFORMANCE: Caches XML and uses early exit optimization
+    # PERFORMANCE: Uses regex for bulk pattern matching with 85+ IOCs
     function Test-EventMatches {
-        param($Event, $Search, $Exclude)
+        param($Event, $Search, $Exclude, $SearchXMLEnabled)
         
-        # Build searchable content efficiently - avoid unnecessary XML parsing
+        # Build searchable content efficiently
         $message = if ([string]::IsNullOrWhiteSpace($Event.Message)) { "" } else { $Event.Message }
         
-        # PERFORMANCE OPTIMIZATION: Only get XML if needed
-        # First check message-only for Search matches (most common case)
+        # PERFORMANCE OPTIMIZATION: Build regex pattern once for multiple IOCs
+        # Regex is MUCH faster than multiple -like comparisons for large IOC lists
         $needsXml = $false
         
         # PRIORITY 1: If Search is specified, check for matches
         if ($Search.Count -gt 0) {
-            # Fast path: Check message first without XML
-            $foundInMessage = $false
-            foreach ($includeStr in $Search) {
-                if ($message -like "*$includeStr*") {
-                    $foundInMessage = $true
-                    break  # Early exit - found match
-                }
+            # Build combined regex pattern (escape special chars, join with OR)
+            if (-not $script:CachedSearchRegex -or $script:CachedSearchStrings -ne ($Search -join '|')) {
+                $escapedPatterns = $Search | ForEach-Object { [regex]::Escape($_) }
+                $script:CachedSearchRegex = ($escapedPatterns -join '|')
+                $script:CachedSearchStrings = ($Search -join '|')
             }
             
-            if ($foundInMessage) {
+            # Single regex match is MUCH faster than 85 -like comparisons
+            if ($message -match $script:CachedSearchRegex) {
                 return $true  # Match found in message - skip XML entirely
             }
             
-            # No match in message, need to check XML
-            $needsXml = $true
+            # Only check XML if SearchXML switch is enabled
+            if ($SearchXMLEnabled) {
+                $needsXml = $true
+            }
+            else {
+                # XML search disabled and no match in message
+                # Return false only if Search was specified (filtering mode)
+                # If no Search specified, we're only checking Exclude
+                if ($Search.Count -gt 0) {
+                    return $false  # Search specified but no match found
+                }
+            }
         }
         
         # PRIORITY 2: Check Exclude only if Search didn't match or wasn't specified
         if ($Exclude.Count -gt 0 -and -not $needsXml) {
-            # Quick check message first
-            foreach ($excludeStr in $Exclude) {
-                if ($message -like "*$excludeStr*") {
-                    return $false  # Excluded - no need to check XML
-                }
+            # Build exclude regex pattern
+            if (-not $script:CachedExcludeRegex -or $script:CachedExcludeStrings -ne ($Exclude -join '|')) {
+                $escapedExcludes = $Exclude | ForEach-Object { [regex]::Escape($_) }
+                $script:CachedExcludeRegex = ($escapedExcludes -join '|')
+                $script:CachedExcludeStrings = ($Exclude -join '|')
             }
-            $needsXml = $true  # Need XML to complete exclude check
+            
+            if ($message -match $script:CachedExcludeRegex) {
+                return $false  # Excluded - no need to check XML
+            }
+            
+            # Only check XML exclude if SearchXML switch is enabled
+            if ($SearchXMLEnabled) {
+                $needsXml = $true
+            }
         }
         
         # Only parse XML if absolutely necessary
         $xmlContent = ""
         if ($needsXml) {
-            try {
-                # Cache XML on the event object to avoid re-parsing
-                if (-not $Event.PSObject.Properties['_CachedXml']) {
-                    $xmlContent = $Event.ToXml()
-                    $Event | Add-Member -MemberType NoteProperty -Name "_CachedXml" -Value $xmlContent -Force
-                }
-                else {
-                    $xmlContent = $Event._CachedXml
-                }
-            }
-            catch {
-                $xmlContent = ""
+            Write-Host "[DEBUG Test-EventMatches] needsXml is TRUE, checking cache..." -ForegroundColor Magenta
+            
+            # Cache FORMATTED XML (same format as display) for consistent search/display
+            # CRITICAL: Check if cached XML is empty/invalid and regenerate if needed
+            $hasCachedXml = $Event.PSObject.Properties['_CachedFormattedXml']
+            Write-Host "[DEBUG Test-EventMatches] Property exists: $($null -ne $hasCachedXml)" -ForegroundColor Cyan
+            
+            if ($hasCachedXml) {
+                $cachedValue = $Event._CachedFormattedXml
+                $cachedLen = if ($null -eq $cachedValue) { 0 } else { $cachedValue.Length }
+                Write-Host "[DEBUG Test-EventMatches] Cached value length: $cachedLen" -ForegroundColor Cyan
             }
             
-            # Complete Search check with XML
+            $cachedIsValid = $hasCachedXml -and (-not [string]::IsNullOrWhiteSpace($Event._CachedFormattedXml))
+            Write-Host "[DEBUG Test-EventMatches] Cache validity: $cachedIsValid" -ForegroundColor $(if ($cachedIsValid) { "Green" } else { "Yellow" })
+            
+            if (-not $cachedIsValid) {
+                Write-Host "[DEBUG Test-EventMatches] Cache INVALID - formatting XML..." -ForegroundColor Yellow
+                
+                try {
+                    $rawXml = $Event.ToXml()
+                    $rawLen = if ($null -eq $rawXml) { 0 } else { $rawXml.Length }
+                    Write-Host "[DEBUG Test-EventMatches] Raw XML length: $rawLen" -ForegroundColor Cyan
+                    
+                    # Use Format-EventXml to create searchable format matching display
+                    Write-Host "[DEBUG Test-EventMatches] Calling Format-EventXml..." -ForegroundColor Yellow
+                    $formattedXml = Format-EventXml -XmlString $rawXml -TruncateLength -1
+                    Write-Host "[DEBUG Test-EventMatches] Format-EventXml completed" -ForegroundColor Yellow
+                    
+                    $formattedLen = if ($null -eq $formattedXml) { 0 } else { $formattedXml.Length }
+                    Write-Host "[DEBUG Test-EventMatches] Formatted XML length: $formattedLen" -ForegroundColor $(if ($formattedLen -gt 0) { "Green" } else { "Red" })
+                    
+                    # Cache and assign OUTSIDE of any preview operations
+                    $Event | Add-Member -MemberType NoteProperty -Name "_CachedFormattedXml" -Value $formattedXml -Force
+                    $xmlContent = $formattedXml
+                    Write-Host "[DEBUG Test-EventMatches] Assigned to xmlContent, length: $($xmlContent.Length)" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "[DEBUG Test-EventMatches] EXCEPTION during Format-EventXml: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "[DEBUG Test-EventMatches] Exception line: $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
+                    $xmlContent = ""
+                }
+            }
+            else {
+                Write-Host "[DEBUG Test-EventMatches] Using VALID cached XML" -ForegroundColor Green
+                $xmlContent = $Event._CachedFormattedXml
+                $contentLen = if ($null -eq $xmlContent) { 0 } else { $xmlContent.Length }
+                Write-Host "[DEBUG Test-EventMatches] xmlContent from cache, length: $contentLen" -ForegroundColor Green
+            }
+            
+            $finalLen = if ($null -eq $xmlContent) { 0 } else { $xmlContent.Length }
+            Write-Host "[DEBUG Test-EventMatches] FINAL xmlContent length: $finalLen" -ForegroundColor Magenta
+            if ($finalLen -gt 0) {
+                $previewLen = [Math]::Min(200, $finalLen)
+                Write-Host "[DEBUG Test-EventMatches] FINAL xmlContent preview: [$($xmlContent.Substring(0, $previewLen))]" -ForegroundColor Magenta
+            }
+            
+            # Complete Search check with XML - search each line with trimming for flexibility
             if ($Search.Count -gt 0) {
-                foreach ($includeStr in $Search) {
-                    if ($xmlContent -like "*$includeStr*") {
-                        return $true  # Found in XML
+                Write-Host "[DEBUG Test-EventMatches] Searching XML content for matches..." -ForegroundColor Magenta
+                $foundMatch = $false
+                $xmlLines = $xmlContent -split "`n"
+                
+                Write-Host "[DEBUG Test-EventMatches] Split into $($xmlLines.Count) lines" -ForegroundColor Cyan
+                if ($xmlLines.Count -gt 0) {
+                    Write-Host "[DEBUG Test-EventMatches] First 3 lines:" -ForegroundColor Cyan
+                    for ($i = 0; $i -lt [Math]::Min(3, $xmlLines.Count); $i++) {
+                        Write-Host "[DEBUG Test-EventMatches]   Line $i raw: [$($xmlLines[$i])]" -ForegroundColor Gray
+                        Write-Host "[DEBUG Test-EventMatches]   Line $i trim: [$($xmlLines[$i].Trim())]" -ForegroundColor Gray
+                    }
+                    Write-Host "[DEBUG Test-EventMatches] Search regex: [$script:CachedSearchRegex]" -ForegroundColor Cyan
+                }
+                
+                foreach ($line in $xmlLines) {
+                    $trimmedLine = $line.Trim()
+                    if ($trimmedLine -match $script:CachedSearchRegex) {
+                        Write-Host "[DEBUG Test-EventMatches] MATCH FOUND: [$trimmedLine]" -ForegroundColor Green
+                        $foundMatch = $true
+                        break
                     }
                 }
-                return $false  # Search specified but no match found
+                
+                if ($foundMatch) {
+                    Write-Host "[DEBUG Test-EventMatches] Returning TRUE - match found in XML" -ForegroundColor Green
+                    return $true
+                }
+                Write-Host "[DEBUG Test-EventMatches] Returning FALSE - NO match in XML" -ForegroundColor Red
+                return $false
             }
             
-            # Complete Exclude check with XML
+            # Complete Exclude check with XML - search each line with trimming
             if ($Exclude.Count -gt 0) {
-                foreach ($excludeStr in $Exclude) {
-                    if ($xmlContent -like "*$excludeStr*") {
+                $xmlLines = $xmlContent -split "`n"
+                foreach ($line in $xmlLines) {
+                    $trimmedLine = $line.Trim()
+                    if ($trimmedLine -match $script:CachedExcludeRegex) {
                         return $false  # Found in exclude
                     }
                 }
@@ -14298,9 +14414,9 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     }
 
     # Function to find matching include strings - returns formatted string of matches with locations
-    # PERFORMANCE: Uses cached XML from Test-EventMatches
+    # PERFORMANCE: Uses cached XML and optimized matching
     function Get-MatchedStrings {
-        param($Event, $Search)
+        param($Event, $Search, $SearchXMLEnabled)
         
         if ($Search.Count -eq 0) {
             return ""
@@ -14309,32 +14425,56 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         $matchList = @()
         $message = if ([string]::IsNullOrWhiteSpace($Event.Message)) { "" } else { $Event.Message }
         
-        # Use cached XML if available (already parsed by Test-EventMatches)
+        # Use cached FORMATTED XML (same format as display)
         $xmlContent = ""
-        if ($Event.PSObject.Properties['_CachedXml']) {
-            $xmlContent = $Event._CachedXml
+        # CRITICAL: Check if cached XML is valid (not empty)
+        $hasCachedXml = $Event.PSObject.Properties['_CachedFormattedXml']
+        $cachedIsValid = $hasCachedXml -and (-not [string]::IsNullOrWhiteSpace($Event._CachedFormattedXml))
+        
+        if ($cachedIsValid) {
+            $xmlContent = $Event._CachedFormattedXml
         }
         else {
             try {
-                $xmlContent = $Event.ToXml()
-                $Event | Add-Member -MemberType NoteProperty -Name "_CachedXml" -Value $xmlContent -Force
+                $rawXml = $Event.ToXml()
+                # Use Format-EventXml to create searchable format matching display
+                $formattedXml = Format-EventXml -XmlString $rawXml -TruncateLength -1
+                $Event | Add-Member -MemberType NoteProperty -Name "_CachedFormattedXml" -Value $formattedXml -Force
+                $xmlContent = $formattedXml
             }
             catch {
                 $xmlContent = ""
             }
         }
         
-        # PERFORMANCE: Early exit on first match in message, then check XML separately
+        # PERFORMANCE: Limit to first 5 matches to avoid performance issues with large IOC lists
+        $maxMatches = 5
+        $matchCount = 0
+        
         foreach ($includeStr in $Search) {
             if ([string]::IsNullOrWhiteSpace($includeStr)) { continue }
+            if ($matchCount -ge $maxMatches) { 
+                $matchList += "... and more"
+                break 
+            }
             
             $foundIn = @()
             try {
-                if ($message -like "*$includeStr*") { 
+                # Use -match for faster performance (already escaped in Test-EventMatches)
+                $escapedPattern = [regex]::Escape($includeStr)
+                if ($message -match $escapedPattern) { 
                     $foundIn += "MSG" 
                 }
-                if ($xmlContent -like "*$includeStr*") { 
-                    $foundIn += "XML" 
+                # Only check XML if SearchXML is enabled - search each line with trimming
+                if ($SearchXMLEnabled) {
+                    $xmlLines = $xmlContent -split "`n"
+                    foreach ($line in $xmlLines) {
+                        $trimmedLine = $line.Trim()
+                        if ($trimmedLine -match $escapedPattern) {
+                            $foundIn += "XML"
+                            break
+                        }
+                    }
                 }
             }
             catch {
@@ -14343,6 +14483,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             }
             
             if ($foundIn.Count -gt 0) {
+                $matchCount++
                 # Truncate long search strings for display
                 $matchStr = if ($includeStr.Length -gt 50) { 
                     $includeStr.Substring(0, 47) + "..." 
@@ -15026,7 +15167,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         
         # FILTER 2: Search/Exclude (content-based filtering)
         if ($Search.Count -gt 0 -or $Exclude.Count -gt 0) {
-            if (-not (Test-EventMatches -Event $event -Search $Search -Exclude $Exclude)) {
+            if (-not (Test-EventMatches -Event $event -Search $Search -Exclude $Exclude -SearchXMLEnabled $SearchXML)) {
                 $filteredCount++
                 continue
             }
@@ -15056,7 +15197,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             $event = $allEvents[$key]
             # ALWAYS recalculate - don't check if property exists
             # Search strings may have changed since event was cached
-            $matchInfo = Get-MatchedStrings -Event $event -Search $Search
+            $matchInfo = Get-MatchedStrings -Event $event -Search $Search -SearchXMLEnabled $SearchXML
             
             # Remove old property if it exists, then add new one
             if ($event.PSObject.Properties['MatchedStrings']) {
@@ -15192,6 +15333,106 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             # If highlighting fails for any reason, fall back to normal printing
             Write-Verbose "Error highlighting message: $($_.Exception.Message)"
             Write-Host $Message -ForegroundColor $NormalColor
+        }
+    }
+
+    # Function to print XML with highlighted search matches
+    function Write-HighlightedXML {
+        param(
+            [string]$XmlText,
+            [string[]]$SearchStrings,
+            [string]$NormalColor = "Gray",
+            [string]$HighlightColor = "Red"
+        )
+        
+        if ([string]::IsNullOrWhiteSpace($XmlText) -or $SearchStrings.Count -eq 0) {
+            Write-Host $XmlText -ForegroundColor $NormalColor
+            return
+        }
+        
+        try {
+            # Split XML into lines for proper indentation
+            $xmlLines = $XmlText -split "`n"
+            
+            foreach ($line in $xmlLines) {
+                if ([string]::IsNullOrWhiteSpace($line.Trim())) { continue }
+                
+                # Build a list of all match positions for this line
+                $allMatches = @()
+                
+                foreach ($searchStr in $SearchStrings) {
+                    if ([string]::IsNullOrWhiteSpace($searchStr)) { continue }
+                    
+                    $position = 0
+                    while ($position -lt $line.Length) {
+                        $foundIndex = $line.IndexOf($searchStr, $position, [StringComparison]::OrdinalIgnoreCase)
+                        
+                        if ($foundIndex -ge 0) {
+                            $allMatches += [PSCustomObject]@{
+                                Start = $foundIndex
+                                End   = $foundIndex + $searchStr.Length
+                                Text  = $line.Substring($foundIndex, $searchStr.Length)
+                            }
+                            $position = $foundIndex + 1
+                        }
+                        else {
+                            break
+                        }
+                    }
+                }
+                
+                if ($allMatches.Count -eq 0) {
+                    # No matches in this line
+                    Write-Host $line -ForegroundColor $NormalColor
+                    continue
+                }
+                
+                # Sort and merge overlapping matches
+                $sortedMatches = $allMatches | Sort-Object Start
+                $mergedMatches = @()
+                $currentMatch = $null
+                
+                foreach ($match in $sortedMatches) {
+                    if ($null -eq $currentMatch) {
+                        $currentMatch = $match
+                    }
+                    elseif ($match.Start -le $currentMatch.End) {
+                        if ($match.End -gt $currentMatch.End) {
+                            $currentMatch.End = $match.End
+                            $currentMatch.Text = $line.Substring($currentMatch.Start, $currentMatch.End - $currentMatch.Start)
+                        }
+                    }
+                    else {
+                        $mergedMatches += $currentMatch
+                        $currentMatch = $match
+                    }
+                }
+                if ($null -ne $currentMatch) {
+                    $mergedMatches += $currentMatch
+                }
+                
+                # Print line with highlights
+                $lastEnd = 0
+                foreach ($match in $mergedMatches) {
+                    if ($match.Start -gt $lastEnd) {
+                        $beforeText = $line.Substring($lastEnd, $match.Start - $lastEnd)
+                        Write-Host $beforeText -NoNewline -ForegroundColor $NormalColor
+                    }
+                    Write-Host $match.Text -NoNewline -ForegroundColor $HighlightColor
+                    $lastEnd = $match.End
+                }
+                
+                if ($lastEnd -lt $line.Length) {
+                    $afterText = $line.Substring($lastEnd)
+                    Write-Host $afterText -NoNewline -ForegroundColor $NormalColor
+                }
+                
+                Write-Host ""
+            }
+        }
+        catch {
+            Write-Verbose "Error highlighting XML: $($_.Exception.Message)"
+            Write-Host $XmlText -ForegroundColor $NormalColor
         }
     }
 
@@ -15334,15 +15575,24 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             # Display XML data if enabled and available
             if (($xmlTruncateLength -ne 0) -and (-not [string]::IsNullOrWhiteSpace($formattedXml)) -and ($formattedXml -ne "[No XML Data]")) {
                 Write-Host "XML Data : " -NoNewline -ForegroundColor Yellow
-                $xmlLines = $formattedXml -split "`n"
-                if ($xmlLines.Count -eq 1) {
-                    Write-Host $formattedXml -ForegroundColor Gray
+                
+                if ($Search.Count -gt 0 -and $SearchXML) {
+                    # Use highlighting when search strings are present AND SearchXML is enabled
+                    Write-Host ""
+                    Write-HighlightedXML -XmlText $formattedXml -SearchStrings $Search -NormalColor "Gray" -HighlightColor "Red"
                 }
                 else {
-                    Write-Host ""
-                    foreach ($line in $xmlLines) {
-                        if ($line.Trim()) {
-                            Write-Host "  $line" -ForegroundColor Gray
+                    # No search or SearchXML disabled - print normally
+                    $xmlLines = $formattedXml -split "`n"
+                    if ($xmlLines.Count -eq 1) {
+                        Write-Host $formattedXml -ForegroundColor Gray
+                    }
+                    else {
+                        Write-Host ""
+                        foreach ($line in $xmlLines) {
+                            if ($line.Trim()) {
+                                Write-Host "  $line" -ForegroundColor Gray
+                            }
                         }
                     }
                 }
