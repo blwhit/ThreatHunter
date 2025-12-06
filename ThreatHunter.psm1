@@ -267,7 +267,7 @@ $script:GlobalLogIOCs = @(
     "\\\\127.0.0.1\\C$", "\\\\localhost\\ADMIN$",
     
     # PowerShell execution flags & download cradles
-    "-EncodedCommand", "-enc ", "powershell.exe -e ", "-ec ",
+    "-EncodedCommand", "-enc ", "powershell.exe -e ", "powershell.exe -ec ",
     "-ExecutionPolicy Bypass", "-ep bypass", "-ex bypass",
     "-WindowStyle Hidden", "-w hidden", "-wi h",
     "-NoProfile", "-nop",
@@ -323,8 +323,7 @@ $script:GlobalLogIOCs = @(
     "dsquery", "gpresult",
     
     # Reconnaissance - System information
-    "whoami /", 
-    "systeminfo", "ipconfig /all", "ipconfig /displaydns",
+    "whoami /", "ipconfig /all", "ipconfig /displaydns",
     "netstat -an", "route print", "arp -a",
     "tasklist", "quser", "query user", "qwinsta",
     "wmic qfe", "wmic product", "wmic service", "wmic process",
@@ -356,7 +355,9 @@ $script:GlobalLogIOCs = @(
     # Obfuscation & encoding
     "[Convert]::FromBase64", "[Convert]::ToBase64",
     "[Text.Encoding]::",
-    "-join", "-replace", "-split",
+    # "-join", # Needs tuned
+    "-replace", 
+    # "-split", # Probably needs tuned
     "[char", "[int[]]",
     ".replace(", ".substring(", "[array]::Reverse",
     "IO.Compression", "IO.MemoryStream",
@@ -12715,6 +12716,16 @@ Array of Event IDs to include. Only events with these IDs will be returned.
 Array of Event IDs to exclude. Takes precedence over all other filters including -Search.
 Use for filtering out noise (e.g., ExcludeEventId 4634 to remove logoff events).
 
+.PARAMETER ProcessID
+Array of Process IDs to filter for. Only events with these Process IDs will be included.
+Works as additive filter with -Search (event must match both).
+Example: -ProcessID 1234,5678
+
+.PARAMETER ThreadID
+Array of Thread IDs to filter for. Only events with these Thread IDs will be included.
+Works as additive filter with -Search (event must match both).
+Example: -ThreadID 9876,5432
+
 .PARAMETER LogNames
 Array of log names to search. If not specified, searches all available logs with activity.
 Examples: "Security", "System", "Application", "Microsoft-Windows-PowerShell/Operational"
@@ -12847,6 +12858,14 @@ Clears the event log cache. Use when switching between sessions or if cache beha
 Hunt-Logs -StartDate "7D" -Search "mimikatz" -SearchXML -OutputCSV "C:\Hunt\"
 Searches last 7 days for "mimikatz" in both message AND XML data (slower but more thorough).
 
+.EXAMPLE
+Hunt-Logs -StartDate "24H" -Search "malicious" -ProcessID 1234,5678 -XML 2500
+Searches last 24 hours for "malicious" but ONLY in events from Process IDs 1234 or 5678.
+
+.EXAMPLE
+Hunt-Logs -StartDate "48H" -EventId 4688 -ProcessID 2468 -ThreadID 3912
+Finds all 4688 events from the last 48 hours with specific Process ID and Thread ID.
+
 .NOTES
 Version: 2.1
 Requires: PowerShell 5.0+
@@ -12878,6 +12897,10 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         [int[]]$EventId = @(),
         [Parameter(Mandatory = $false)]
         [int[]]$ExcludeEventId = @(),
+        [Parameter(Mandatory = $false)]
+        [int[]]$ProcessID = @(),
+        [Parameter(Mandatory = $false)]
+        [int[]]$ThreadID = @(),
         [Parameter(Mandatory = $false)]
         [string[]]$LogNames = @(),
         [Parameter(Mandatory = $false)]
@@ -12919,9 +12942,9 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     
     # Cache regex patterns to avoid rebuilding them for each event
     $script:CachedSearchRegex = $null
-    $script:CachedSearchStrings = $null
+    $script:CachedSearchReference = $null
     $script:CachedExcludeRegex = $null
-    $script:CachedExcludeStrings = $null
+    $script:CachedExcludeReference = $null
     
     # ============================================================================
     # DEFENSIVE VALIDATION
@@ -13011,6 +13034,42 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         }
     }
     
+    # Validate ProcessID arrays contain only valid integers (process IDs are always >= 0)
+    if ($ProcessID.Count -gt 0) {
+        $validPIDs = @()
+        $invalidPIDs = @()
+        foreach ($processIdentifier in $ProcessID) {
+            if ($processIdentifier -ge 0) {
+                $validPIDs += $processIdentifier
+            }
+            else {
+                $invalidPIDs += $processIdentifier
+            }
+        }
+        if ($invalidPIDs.Count -gt 0) {
+            Write-Warning "Invalid Process IDs detected (must be non-negative): $($invalidPIDs -join ', ')"
+            $ProcessID = $validPIDs
+        }
+    }
+    
+    # Validate ThreadID arrays contain only valid integers (thread IDs are always >= 0)
+    if ($ThreadID.Count -gt 0) {
+        $validTIDs = @()
+        $invalidTIDs = @()
+        foreach ($tid in $ThreadID) {
+            if ($tid -ge 0) {
+                $validTIDs += $tid
+            }
+            else {
+                $invalidTIDs += $tid
+            }
+        }
+        if ($invalidTIDs.Count -gt 0) {
+            Write-Warning "Invalid Thread IDs detected (must be non-negative): $($invalidTIDs -join ', ')"
+            $ThreadID = $validTIDs
+        }
+    }
+    
     # Validate parameter combinations
     if ($PSBoundParameters.ContainsKey('Aggressive') -and $Search.Count -eq 0) {
         throw "The -Aggressive parameter requires -Search to be specified. Aggressive mode searches file systems for IOCs specified in -Search."
@@ -13066,7 +13125,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     # ============================================================================
     
     # Initialize global cache if not exists
-    if ($null -eq (Get-Variable -Name "HuntLogsCache" -Scope Global -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path Variable:\global:HuntLogsCache)) {
         $global:HuntLogsCache = @{
             Enabled        = $true
             LastQueryTime  = $null
@@ -13076,6 +13135,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 EndDate    = $null  # Absolute DateTime
                 LogNames   = @()
                 EventId    = @()
+                ProcessID  = @()
+                ThreadID   = @()
                 FolderPath = ""
                 Mode       = ""     # "Live" or "EVTX"
                 SystemTZ   = $null  # System timezone at cache time
@@ -13111,6 +13172,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 EndDate    = $null
                 LogNames   = @()
                 EventId    = @()
+                ProcessID  = @()
+                ThreadID   = @()
                 FolderPath = ""
                 Mode       = ""
                 SystemTZ   = $null
@@ -13134,6 +13197,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
             $RequestedEndDate,
             [string[]]$RequestedLogNames,
             [int[]]$RequestedEventId,
+            [int[]]$RequestedProcessID,
+            [int[]]$RequestedThreadID,
             [string]$RequestedFolderPath,
             [string]$RequestedMode
         )
@@ -13165,7 +13230,9 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
             }
             
             # Check timezone hasn't changed (affects time comparisons)
-            if ($global:HuntLogsCache.Parameters.SystemTZ -ne $systemTimeZone.Id) {
+            $currentSystemTZ = [System.TimeZoneInfo]::Local.Id
+            if ($null -ne $global:HuntLogsCache.Parameters.SystemTZ -and 
+                $global:HuntLogsCache.Parameters.SystemTZ -ne $currentSystemTZ) {
                 Write-Verbose "System timezone changed since cache creation"
                 return @{ Valid = $false; Reason = "Timezone changed"; RequiresFullRefresh = $true }
             }
@@ -13267,6 +13334,42 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 }
             }
             
+            # Check if requested ProcessIDs are subset of cached ProcessIDs
+            # Empty cached ProcessID list means "all ProcessIDs" were cached
+            if ($global:HuntLogsCache.Parameters.ProcessID.Count -gt 0) {
+                if ($RequestedProcessID.Count -eq 0) {
+                    # Requested "all ProcessIDs" but cache only has specific ProcessIDs
+                    Write-Verbose "Requested all ProcessIDs, but cache has specific ProcessIDs only"
+                    return @{ Valid = $false; Reason = "Cache has subset of ProcessIDs"; RequiresFullRefresh = $true }
+                }
+                
+                # Check if all requested ProcessIDs are in cache
+                foreach ($requestedPid in $RequestedProcessID) {
+                    if ($global:HuntLogsCache.Parameters.ProcessID -notcontains $requestedPid) {
+                        Write-Verbose "Requested ProcessID $requestedPid not in cache"
+                        return @{ Valid = $false; Reason = "Requested ProcessID not in cache"; RequiresFullRefresh = $true }
+                    }
+                }
+            }
+            
+            # Check if requested ThreadIDs are subset of cached ThreadIDs
+            # Empty cached ThreadID list means "all ThreadIDs" were cached
+            if ($global:HuntLogsCache.Parameters.ThreadID.Count -gt 0) {
+                if ($RequestedThreadID.Count -eq 0) {
+                    # Requested "all ThreadIDs" but cache only has specific ThreadIDs
+                    Write-Verbose "Requested all ThreadIDs, but cache has specific ThreadIDs only"
+                    return @{ Valid = $false; Reason = "Cache has subset of ThreadIDs"; RequiresFullRefresh = $true }
+                }
+                
+                # Check if all requested ThreadIDs are in cache
+                foreach ($requestedTid in $RequestedThreadID) {
+                    if ($global:HuntLogsCache.Parameters.ThreadID -notcontains $requestedTid) {
+                        Write-Verbose "Requested ThreadID $requestedTid not in cache"
+                        return @{ Valid = $false; Reason = "Requested ThreadID not in cache"; RequiresFullRefresh = $true }
+                    }
+                }
+            }
+            
             # Cache is valid and fully covers requested query
             Write-Verbose "Cache is valid and covers requested query"
             return @{
@@ -13289,7 +13392,9 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
             $StartDate,
             $EndDate,
             [string[]]$LogNames,
-            [int[]]$EventId
+            [int[]]$EventId,
+            [int[]]$ProcessID,
+            [int[]]$ThreadID
         )
         
         try {
@@ -13321,6 +13426,20 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 # Filter by event IDs (if specified)
                 if ($EventId.Count -gt 0) {
                     if ($EventId -notcontains $event.Id) {
+                        continue
+                    }
+                }
+                
+                # Filter by Process IDs (if specified)
+                if ($ProcessID.Count -gt 0) {
+                    if ($ProcessID -notcontains $event.ProcessId) {
+                        continue
+                    }
+                }
+                
+                # Filter by Thread IDs (if specified)
+                if ($ThreadID.Count -gt 0) {
+                    if ($ThreadID -notcontains $event.ThreadId) {
                         continue
                     }
                 }
@@ -13373,6 +13492,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
             $EndDate,
             [string[]]$LogNames,
             [int[]]$EventId,
+            [int[]]$ProcessID,
+            [int[]]$ThreadID,
             [string]$FolderPath,
             [string]$Mode
         )
@@ -13432,9 +13553,43 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 # Cache had "all IDs", keep it that way
             }
             
+            # Update ProcessIDs (expand if necessary)
+            if ($ProcessID.Count -eq 0) {
+                # "All ProcessIDs" query - clear specific ProcessIDs
+                $global:HuntLogsCache.Parameters.ProcessID = @()
+            }
+            elseif ($global:HuntLogsCache.Parameters.ProcessID.Count -gt 0) {
+                # Add any new ProcessIDs
+                foreach ($id in $ProcessID) {
+                    if ($global:HuntLogsCache.Parameters.ProcessID -notcontains $id) {
+                        $global:HuntLogsCache.Parameters.ProcessID += $id
+                    }
+                }
+            }
+            else {
+                # Cache had "all ProcessIDs", keep it that way
+            }
+            
+            # Update ThreadIDs (expand if necessary)
+            if ($ThreadID.Count -eq 0) {
+                # "All ThreadIDs" query - clear specific ThreadIDs
+                $global:HuntLogsCache.Parameters.ThreadID = @()
+            }
+            elseif ($global:HuntLogsCache.Parameters.ThreadID.Count -gt 0) {
+                # Add any new ThreadIDs
+                foreach ($id in $ThreadID) {
+                    if ($global:HuntLogsCache.Parameters.ThreadID -notcontains $id) {
+                        $global:HuntLogsCache.Parameters.ThreadID += $id
+                    }
+                }
+            }
+            else {
+                # Cache had "all ThreadIDs", keep it that way
+            }
+            
             $global:HuntLogsCache.Parameters.FolderPath = $FolderPath
             $global:HuntLogsCache.Parameters.Mode = $Mode
-            $global:HuntLogsCache.Parameters.SystemTZ = $systemTimeZone.Id
+            $global:HuntLogsCache.Parameters.SystemTZ = [System.TimeZoneInfo]::Local.Id
             $global:HuntLogsCache.LastQueryTime = Get-Date
             
             if ($null -eq $global:HuntLogsCache.CacheCreatedAt) {
@@ -13460,11 +13615,10 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     }
 
     # Check for administrator privileges for optimal functionality
-    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-
-    if (-not $isAdmin) {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Warning "Not running as Administrator. Some event logs may be inaccessible, reducing detection coverage."
-    } 
+    }
 
     # Initialize result collection for PassThru
     $script:HuntLogResults = @()
@@ -13538,9 +13692,6 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
             }
         }
     }
-    # Initialize timezone handling (MUST BE BEFORE Auto mode)
-    $systemTimeZone = [System.TimeZoneInfo]::Local
-
     # Function to get timezone info by name/abbreviation
     function Get-TimezoneInfo {
         param($TimezoneName)
@@ -13570,7 +13721,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         }
         catch {
             Write-Warning "Invalid timezone '$TimezoneName', using system local time"
-            return $systemTimeZone
+            return [System.TimeZoneInfo]::Local
         }
     }
 
@@ -13578,10 +13729,13 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     function ConvertTo-DateTime {
         param($InputValue, $TargetTimeZone)
         
+        # Get current system timezone
+        $currentSystemTZ = [System.TimeZoneInfo]::Local
+        
         if ($InputValue -is [datetime]) {
             # Convert to target timezone for internal processing, then back to system time for search
-            if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
-                $convertedTime = [System.TimeZoneInfo]::ConvertTime($InputValue, $TargetTimeZone, $systemTimeZone)
+            if ($TargetTimeZone.Id -ne $currentSystemTZ.Id) {
+                $convertedTime = [System.TimeZoneInfo]::ConvertTime($InputValue, $TargetTimeZone, $currentSystemTZ)
                 return $convertedTime
             }
             return $InputValue
@@ -13609,9 +13763,9 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 try {
                     $parsedDate = [datetime]$InputValue
                     # If user specified a timezone, interpret the input date as being in that timezone
-                    if ($TargetTimeZone.Id -ne $systemTimeZone.Id) {
+                    if ($TargetTimeZone.Id -ne $currentSystemTZ.Id) {
                         # Convert from target timezone to system timezone for search
-                        $convertedTime = [System.TimeZoneInfo]::ConvertTime($parsedDate, $TargetTimeZone, $systemTimeZone)
+                        $convertedTime = [System.TimeZoneInfo]::ConvertTime($parsedDate, $TargetTimeZone, $currentSystemTZ)
                         return $convertedTime
                     }
                     return $parsedDate
@@ -13629,13 +13783,21 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     function Format-DateTimeWithTimeZone {
         param($DateTime, $TargetTimeZone)
         
+        # Defensive: Validate DateTime parameter
+        if ($null -eq $DateTime) {
+            return "[Invalid DateTime]"
+        }
+        
+        # Get current system timezone for comparison
+        $currentSystemTZ = [System.TimeZoneInfo]::Local
+        
         # Convert from system time to target timezone for display
-        if ($TargetTimeZone.Id -eq $systemTimeZone.Id) {
+        if ($TargetTimeZone.Id -eq $currentSystemTZ.Id) {
             $convertedTime = $DateTime
-            $tzAbbrev = $systemTimeZone.StandardName.Split(' ')[0]
+            $tzAbbrev = $currentSystemTZ.StandardName.Split(' ')[0]
         }
         else {
-            $convertedTime = [System.TimeZoneInfo]::ConvertTime($DateTime, $systemTimeZone, $TargetTimeZone)
+            $convertedTime = [System.TimeZoneInfo]::ConvertTime($DateTime, $currentSystemTZ, $TargetTimeZone)
             
             $tzAbbrev = if ($TargetTimeZone.Id -eq 'UTC') { 
                 'UTC' 
@@ -13660,7 +13822,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         return $convertedTime.ToString("yyyy-MM-dd HH:mm:ss") + " $tzAbbrev"
     }
 
-    $targetTimeZone = if ([string]::IsNullOrWhiteSpace($Timezone)) { $systemTimeZone } else { Get-TimezoneInfo -TimezoneName $Timezone }
+    $targetTimeZone = if ([string]::IsNullOrWhiteSpace($Timezone)) { [System.TimeZoneInfo]::Local } else { Get-TimezoneInfo -TimezoneName $Timezone }
 
     # Handle Auto mode - SIMPLIFIED VERSION
     if ($Auto) {
@@ -13686,6 +13848,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         if ($Exclude.Count -gt 0) { $finalParams.Exclude = $Exclude }
         if ($EventId.Count -gt 0) { $finalParams.EventId = $EventId }
         if ($ExcludeEventId.Count -gt 0) { $finalParams.ExcludeEventId = $ExcludeEventId }
+        if ($ProcessID.Count -gt 0) { $finalParams.ProcessID = $ProcessID }
+        if ($ThreadID.Count -gt 0) { $finalParams.ThreadID = $ThreadID }
         if ($PSBoundParameters.ContainsKey('FolderPath')) { $finalParams.FolderPath = $FolderPath }
         if ($PSBoundParameters.ContainsKey('Export')) { $finalParams.Export = $Export }
         if ($PSBoundParameters.ContainsKey('Aggressive')) { $finalParams.Aggressive = $Aggressive }
@@ -14131,25 +14295,37 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
 
     # Function to format XML - MUST BE DEFINED BEFORE Test-EventMatches
     function Format-EventXml {
-        param($XmlString, $TruncateLength)
+        param(
+            [Parameter(Mandatory = $true)]
+            [AllowEmptyString()]
+            [string]$XmlString,
+            
+            [Parameter(Mandatory = $true)]
+            [int]$TruncateLength
+        )
         
         try {
-            Write-Host "[DEBUG Format-EventXml] Called - TruncateLength: $TruncateLength, Input length: $($XmlString.Length)" -ForegroundColor Magenta
-            
+            # Defensive: Handle null/empty input
             if ([string]::IsNullOrWhiteSpace($XmlString)) { 
-                Write-Host "[DEBUG Format-EventXml] Input is NULL/EMPTY - returning placeholder" -ForegroundColor Red
+                Write-Verbose "Format-EventXml: XML string is null or empty"
                 return "[No XML Data]" 
             }
             
+            # Defensive: Handle disabled display
             if ($TruncateLength -eq 0) { 
-                Write-Host "[DEBUG Format-EventXml] TruncateLength is 0 - returning disabled message" -ForegroundColor Yellow
+                Write-Verbose "Format-EventXml: XML display disabled (TruncateLength=0)"
                 return "[XML Display Disabled]" 
             }
             
-            Write-Host "[DEBUG Format-EventXml] Parsing XML document..." -ForegroundColor Cyan
+            # Parse XML with defensive error handling
             $xmlDoc = [xml]$XmlString
             $outputLines = @()
-            Write-Host "[DEBUG Format-EventXml] Parse successful, Event.System exists: $($null -ne $xmlDoc.Event.System)" -ForegroundColor Cyan
+            
+            # Defensive: Verify XML structure
+            if ($null -eq $xmlDoc -or $null -eq $xmlDoc.Event) {
+                Write-Verbose "Format-EventXml: Invalid XML structure - Event node missing"
+                return "  [Invalid XML Structure]"
+            }
             
             if ($xmlDoc.Event.System) {
                 $system = $xmlDoc.Event.System
@@ -14200,30 +14376,42 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                 }
             }
             
+            # Join output lines
             $result = ($outputLines -join "`n")
-            Write-Host "[DEBUG Format-EventXml] Created $($outputLines.Count) lines, joined length: $($result.Length)" -ForegroundColor Cyan
-            Write-Host "[DEBUG Format-EventXml] Result first 100 chars: $($result.Substring(0, [Math]::Min(100, $result.Length)))" -ForegroundColor Cyan
+            Write-Verbose "Format-EventXml: Successfully formatted XML ($($outputLines.Count) lines, $($result.Length) chars)"
             
+            # Apply truncation if needed (defensive length checks)
             if ($TruncateLength -gt 0 -and $result.Length -gt $TruncateLength) {
-                $truncateLen = [Math]::Max(0, [Math]::Min($TruncateLength, $result.Length))
-                if ($truncateLen -gt 0) {
-                    $result = $result.Substring(0, $truncateLen) + "..."
-                    Write-Host "[DEBUG Format-EventXml] Truncated to $truncateLen characters" -ForegroundColor Yellow
+                try {
+                    $truncateLen = [Math]::Min($TruncateLength, $result.Length)
+                    if ($truncateLen -gt 0 -and $truncateLen -le $result.Length) {
+                        $result = $result.Substring(0, $truncateLen) + "..."
+                        Write-Verbose "Format-EventXml: Truncated to $truncateLen characters"
+                    }
+                }
+                catch {
+                    Write-Verbose "Format-EventXml: Truncation failed, returning full result"
                 }
             }
             
-            Write-Host "[DEBUG Format-EventXml] RETURNING - Final length: $($result.Length)" -ForegroundColor Green
             return $result
             
         }
         catch {
-            Write-Host "[DEBUG Format-EventXml] CATCH EXCEPTION: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "[DEBUG Format-EventXml] Exception at line: $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
-            $rawResult = "  [XML Parse Error] Raw: $XmlString"
-            if ($TruncateLength -gt 0 -and $rawResult.Length -gt $TruncateLength) {
-                $truncateLen = [Math]::Max(0, [Math]::Min($TruncateLength, $rawResult.Length))
-                if ($truncateLen -gt 0) {
-                    $rawResult = $rawResult.Substring(0, $truncateLen) + "..."
+            Write-Verbose "Format-EventXml: XML parsing error - $($_.Exception.Message)"
+            
+            # Return safe error message (defensive truncation)
+            $rawResult = "  [XML Parse Error]"
+            if ($TruncateLength -gt 0) {
+                try {
+                    $truncateLen = [Math]::Min($TruncateLength, $rawResult.Length)
+                    if ($truncateLen -gt 0 -and $truncateLen -le $rawResult.Length) {
+                        $rawResult = $rawResult.Substring(0, $truncateLen) + "..."
+                    }
+                }
+                catch {
+                    # If even error truncation fails, return minimal error
+                    $rawResult = "  [XML Error]"
                 }
             }
             return $rawResult
@@ -14245,10 +14433,11 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # PRIORITY 1: If Search is specified, check for matches
         if ($Search.Count -gt 0) {
             # Build combined regex pattern (escape special chars, join with OR)
-            if (-not $script:CachedSearchRegex -or $script:CachedSearchStrings -ne ($Search -join '|')) {
+            # PERFORMANCE: Cache based on reference equality for speed
+            if (-not $script:CachedSearchRegex -or $script:CachedSearchReference -ne $Search) {
                 $escapedPatterns = $Search | ForEach-Object { [regex]::Escape($_) }
                 $script:CachedSearchRegex = ($escapedPatterns -join '|')
-                $script:CachedSearchStrings = ($Search -join '|')
+                $script:CachedSearchReference = $Search
             }
             
             # Single regex match is MUCH faster than 85 -like comparisons
@@ -14273,10 +14462,11 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # PRIORITY 2: Check Exclude only if Search didn't match or wasn't specified
         if ($Exclude.Count -gt 0 -and -not $needsXml) {
             # Build exclude regex pattern
-            if (-not $script:CachedExcludeRegex -or $script:CachedExcludeStrings -ne ($Exclude -join '|')) {
+            # PERFORMANCE: Cache based on reference equality for speed
+            if (-not $script:CachedExcludeRegex -or $script:CachedExcludeReference -ne $Exclude) {
                 $escapedExcludes = $Exclude | ForEach-Object { [regex]::Escape($_) }
                 $script:CachedExcludeRegex = ($escapedExcludes -join '|')
-                $script:CachedExcludeStrings = ($Exclude -join '|')
+                $script:CachedExcludeReference = $Exclude
             }
             
             if ($message -match $script:CachedExcludeRegex) {
@@ -14292,94 +14482,81 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # Only parse XML if absolutely necessary
         $xmlContent = ""
         if ($needsXml) {
-            Write-Host "[DEBUG Test-EventMatches] needsXml is TRUE, checking cache..." -ForegroundColor Magenta
-            
             # Cache FORMATTED XML (same format as display) for consistent search/display
-            # CRITICAL: Check if cached XML is empty/invalid and regenerate if needed
+            # Defensive: Check if cached XML exists and is valid (not empty)
             $hasCachedXml = $Event.PSObject.Properties['_CachedFormattedXml']
-            Write-Host "[DEBUG Test-EventMatches] Property exists: $($null -ne $hasCachedXml)" -ForegroundColor Cyan
-            
-            if ($hasCachedXml) {
-                $cachedValue = $Event._CachedFormattedXml
-                $cachedLen = if ($null -eq $cachedValue) { 0 } else { $cachedValue.Length }
-                Write-Host "[DEBUG Test-EventMatches] Cached value length: $cachedLen" -ForegroundColor Cyan
-            }
-            
             $cachedIsValid = $hasCachedXml -and (-not [string]::IsNullOrWhiteSpace($Event._CachedFormattedXml))
-            Write-Host "[DEBUG Test-EventMatches] Cache validity: $cachedIsValid" -ForegroundColor $(if ($cachedIsValid) { "Green" } else { "Yellow" })
             
             if (-not $cachedIsValid) {
-                Write-Host "[DEBUG Test-EventMatches] Cache INVALID - formatting XML..." -ForegroundColor Yellow
-                
+                # Need to format XML - defensive error handling
                 try {
                     $rawXml = $Event.ToXml()
-                    $rawLen = if ($null -eq $rawXml) { 0 } else { $rawXml.Length }
-                    Write-Host "[DEBUG Test-EventMatches] Raw XML length: $rawLen" -ForegroundColor Cyan
                     
-                    # Use Format-EventXml to create searchable format matching display
-                    Write-Host "[DEBUG Test-EventMatches] Calling Format-EventXml..." -ForegroundColor Yellow
-                    $formattedXml = Format-EventXml -XmlString $rawXml -TruncateLength -1
-                    Write-Host "[DEBUG Test-EventMatches] Format-EventXml completed" -ForegroundColor Yellow
-                    
-                    $formattedLen = if ($null -eq $formattedXml) { 0 } else { $formattedXml.Length }
-                    Write-Host "[DEBUG Test-EventMatches] Formatted XML length: $formattedLen" -ForegroundColor $(if ($formattedLen -gt 0) { "Green" } else { "Red" })
-                    
-                    # Cache and assign OUTSIDE of any preview operations
-                    $Event | Add-Member -MemberType NoteProperty -Name "_CachedFormattedXml" -Value $formattedXml -Force
-                    $xmlContent = $formattedXml
-                    Write-Host "[DEBUG Test-EventMatches] Assigned to xmlContent, length: $($xmlContent.Length)" -ForegroundColor Green
+                    # Defensive: Verify we got valid XML string
+                    if ([string]::IsNullOrWhiteSpace($rawXml)) {
+                        Write-Verbose "Test-EventMatches: Event.ToXml() returned empty string"
+                        $xmlContent = ""
+                    }
+                    else {
+                        # Format XML for searching (use -1 for full content, no truncation)
+                        $formattedXml = Format-EventXml -XmlString $rawXml -TruncateLength -1
+                        
+                        # Defensive: Verify formatting succeeded
+                        if ([string]::IsNullOrWhiteSpace($formattedXml)) {
+                            Write-Verbose "Test-EventMatches: Format-EventXml returned empty string"
+                            $xmlContent = ""
+                        }
+                        else {
+                            # Cache the formatted XML and assign to search content
+                            $Event | Add-Member -MemberType NoteProperty -Name "_CachedFormattedXml" -Value $formattedXml -Force
+                            $xmlContent = $formattedXml
+                            Write-Verbose "Test-EventMatches: Formatted and cached XML ($($xmlContent.Length) chars)"
+                        }
+                    }
                 }
                 catch {
-                    Write-Host "[DEBUG Test-EventMatches] EXCEPTION during Format-EventXml: $($_.Exception.Message)" -ForegroundColor Red
-                    Write-Host "[DEBUG Test-EventMatches] Exception line: $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
+                    Write-Verbose "Test-EventMatches: Error formatting XML - $($_.Exception.Message)"
                     $xmlContent = ""
                 }
             }
             else {
-                Write-Host "[DEBUG Test-EventMatches] Using VALID cached XML" -ForegroundColor Green
+                # Use valid cached XML
                 $xmlContent = $Event._CachedFormattedXml
-                $contentLen = if ($null -eq $xmlContent) { 0 } else { $xmlContent.Length }
-                Write-Host "[DEBUG Test-EventMatches] xmlContent from cache, length: $contentLen" -ForegroundColor Green
-            }
-            
-            $finalLen = if ($null -eq $xmlContent) { 0 } else { $xmlContent.Length }
-            Write-Host "[DEBUG Test-EventMatches] FINAL xmlContent length: $finalLen" -ForegroundColor Magenta
-            if ($finalLen -gt 0) {
-                $previewLen = [Math]::Min(200, $finalLen)
-                Write-Host "[DEBUG Test-EventMatches] FINAL xmlContent preview: [$($xmlContent.Substring(0, $previewLen))]" -ForegroundColor Magenta
+                Write-Verbose "Test-EventMatches: Using cached XML ($($xmlContent.Length) chars)"
             }
             
             # Complete Search check with XML - search each line with trimming for flexibility
             if ($Search.Count -gt 0) {
-                Write-Host "[DEBUG Test-EventMatches] Searching XML content for matches..." -ForegroundColor Magenta
+                # Defensive: Verify we have content to search
+                if ([string]::IsNullOrWhiteSpace($xmlContent)) {
+                    Write-Verbose "Test-EventMatches: No XML content available for search"
+                    return $false
+                }
+                
                 $foundMatch = $false
-                $xmlLines = $xmlContent -split "`n"
                 
-                Write-Host "[DEBUG Test-EventMatches] Split into $($xmlLines.Count) lines" -ForegroundColor Cyan
-                if ($xmlLines.Count -gt 0) {
-                    Write-Host "[DEBUG Test-EventMatches] First 3 lines:" -ForegroundColor Cyan
-                    for ($i = 0; $i -lt [Math]::Min(3, $xmlLines.Count); $i++) {
-                        Write-Host "[DEBUG Test-EventMatches]   Line $i raw: [$($xmlLines[$i])]" -ForegroundColor Gray
-                        Write-Host "[DEBUG Test-EventMatches]   Line $i trim: [$($xmlLines[$i].Trim())]" -ForegroundColor Gray
-                    }
-                    Write-Host "[DEBUG Test-EventMatches] Search regex: [$script:CachedSearchRegex]" -ForegroundColor Cyan
-                }
-                
-                foreach ($line in $xmlLines) {
-                    $trimmedLine = $line.Trim()
-                    if ($trimmedLine -match $script:CachedSearchRegex) {
-                        Write-Host "[DEBUG Test-EventMatches] MATCH FOUND: [$trimmedLine]" -ForegroundColor Green
-                        $foundMatch = $true
-                        break
+                try {
+                    # Split XML into lines for line-by-line matching
+                    $xmlLines = $xmlContent -split "`n"
+                    
+                    # Search each line (with trimming for flexibility)
+                    foreach ($line in $xmlLines) {
+                        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                        
+                        $trimmedLine = $line.Trim()
+                        if ($trimmedLine -match $script:CachedSearchRegex) {
+                            $foundMatch = $true
+                            Write-Verbose "Test-EventMatches: Match found in XML"
+                            break
+                        }
                     }
                 }
-                
-                if ($foundMatch) {
-                    Write-Host "[DEBUG Test-EventMatches] Returning TRUE - match found in XML" -ForegroundColor Green
-                    return $true
+                catch {
+                    Write-Verbose "Test-EventMatches: Error searching XML - $($_.Exception.Message)"
+                    return $false
                 }
-                Write-Host "[DEBUG Test-EventMatches] Returning FALSE - NO match in XML" -ForegroundColor Red
-                return $false
+                
+                return $foundMatch
             }
             
             # Complete Exclude check with XML - search each line with trimming
@@ -14427,36 +14604,38 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         
         # Use cached FORMATTED XML (same format as display)
         $xmlContent = ""
-        # CRITICAL: Check if cached XML is valid (not empty)
+        
+        # Defensive: Check if cached XML exists and is valid (not empty)
         $hasCachedXml = $Event.PSObject.Properties['_CachedFormattedXml']
         $cachedIsValid = $hasCachedXml -and (-not [string]::IsNullOrWhiteSpace($Event._CachedFormattedXml))
         
         if ($cachedIsValid) {
+            # Use existing valid cache
             $xmlContent = $Event._CachedFormattedXml
         }
         else {
+            # Need to format XML - defensive error handling
             try {
                 $rawXml = $Event.ToXml()
-                # Use Format-EventXml to create searchable format matching display
-                $formattedXml = Format-EventXml -XmlString $rawXml -TruncateLength -1
-                $Event | Add-Member -MemberType NoteProperty -Name "_CachedFormattedXml" -Value $formattedXml -Force
-                $xmlContent = $formattedXml
+                
+                if (-not [string]::IsNullOrWhiteSpace($rawXml)) {
+                    $formattedXml = Format-EventXml -XmlString $rawXml -TruncateLength -1
+                    
+                    if (-not [string]::IsNullOrWhiteSpace($formattedXml)) {
+                        $Event | Add-Member -MemberType NoteProperty -Name "_CachedFormattedXml" -Value $formattedXml -Force
+                        $xmlContent = $formattedXml
+                    }
+                }
             }
             catch {
+                Write-Verbose "Get-MatchedStrings: Error formatting XML - $($_.Exception.Message)"
                 $xmlContent = ""
             }
         }
         
-        # PERFORMANCE: Limit to first 5 matches to avoid performance issues with large IOC lists
-        $maxMatches = 5
-        $matchCount = 0
-        
+        # Collect ALL matches - forensics requires complete data
         foreach ($includeStr in $Search) {
             if ([string]::IsNullOrWhiteSpace($includeStr)) { continue }
-            if ($matchCount -ge $maxMatches) { 
-                $matchList += "... and more"
-                break 
-            }
             
             $foundIn = @()
             try {
@@ -14483,7 +14662,6 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             }
             
             if ($foundIn.Count -gt 0) {
-                $matchCount++
                 # Truncate long search strings for display
                 $matchStr = if ($includeStr.Length -gt 50) { 
                     $includeStr.Substring(0, 47) + "..." 
@@ -14571,9 +14749,10 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         Write-Host "Scanning $($safeLogFiles.Count) safe-sized files for matches..." -ForegroundColor Green
 
         $currentFileIndex = 0
+        $totalSafeFiles = $safeLogFiles.Count
         foreach ($logFile in $safeLogFiles) {
             $currentFileIndex++
-            $percentComplete = [math]::Min(($currentFileIndex / $safeLogFiles.Count) * 100, 100)
+            $percentComplete = [math]::Min(($currentFileIndex / $totalSafeFiles) * 100, 100)
             Write-Progress -Activity "Aggressive Log Search" -Status "Processing $($logFile.Name) ($currentFileIndex of $($safeLogFiles.Count))" -PercentComplete $percentComplete
             
             try {
@@ -14689,6 +14868,8 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         -RequestedEndDate $parsedEndDate `
         -RequestedLogNames $LogNames `
         -RequestedEventId $EventId `
+        -RequestedProcessID $ProcessID `
+        -RequestedThreadID $ThreadID `
         -RequestedFolderPath $queryFolderPath `
         -RequestedMode $queryMode
     
@@ -14795,7 +14976,9 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                 -StartDate $parsedStartDate `
                 -EndDate $parsedEndDate `
                 -LogNames $LogNames `
-                -EventId $EventId
+                -EventId $EventId `
+                -ProcessID $ProcessID `
+                -ThreadID $ThreadID
             
             $eventCount = $allEvents.Count
             
@@ -14878,16 +15061,18 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             }
 
             # Display timezone context for EVTX files
-            if ($targetTimeZone.Id -ne $systemTimeZone.Id) {
+            $currentSystemTZ = [System.TimeZoneInfo]::Local
+            if ($targetTimeZone.Id -ne $currentSystemTZ.Id) {
                 Write-Host "EVTX Timezone Note: Search range converted from $($targetTimeZone.DisplayName) to system time" -ForegroundColor Cyan
                 Write-Host "Log timestamps will be converted to $($targetTimeZone.DisplayName) for display" -ForegroundColor Cyan
             }
 
             $currentFileIndex = 0
+            $totalFiles = $evtxFileList.Count
             foreach ($evtxFile in $evtxFileList) {
                 $currentFileIndex++
-                $percentComplete = [math]::Min(25 + (($currentFileIndex / $evtxFileList.Count) * 60), 85)
-                Write-Progress -Activity "Hunt-Logs Search" -Status "Processing EVTX file $currentFileIndex of $($evtxFileList.Count): $($evtxFile.Name) (Found: $eventCount events)" -PercentComplete $percentComplete
+                $percentComplete = [math]::Min(25 + (($currentFileIndex / $totalFiles) * 60), 85)
+                Write-Progress -Activity "Hunt-Logs Search" -Status "Processing EVTX file $currentFileIndex of $totalFiles`: $($evtxFile.Name) (Found: $eventCount events)" -PercentComplete $percentComplete
 
                 try {
                     $filterHash = @{
@@ -14956,6 +15141,8 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                         -EndDate $parsedEndDate `
                         -LogNames $LogNames `
                         -EventId $EventId `
+                        -ProcessID $ProcessID `
+                        -ThreadID $ThreadID `
                         -FolderPath $queryFolderPath `
                         -Mode $queryMode
                 
@@ -15125,6 +15312,8 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                         -EndDate $parsedEndDate `
                         -LogNames $LogNames `
                         -EventId $EventId `
+                        -ProcessID $ProcessID `
+                        -ThreadID $ThreadID `
                         -FolderPath $queryFolderPath `
                         -Mode $queryMode
                 
@@ -15156,17 +15345,41 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     $preFilterCount = $allEvents.Count
     $filteredEvents = @{}
     
+    # Cache filter counts for performance
+    $hasExcludeEventId = $ExcludeEventId.Count -gt 0
+    $hasProcessIDFilter = $ProcessID.Count -gt 0
+    $hasThreadIDFilter = $ThreadID.Count -gt 0
+    $hasSearchOrExclude = $Search.Count -gt 0 -or $Exclude.Count -gt 0
+    
     foreach ($key in $allEvents.Keys) {
         $event = $allEvents[$key]
         
         # FILTER 1: ExcludeEventId (highest precedence - skip immediately)
-        if ($ExcludeEventId.Count -gt 0 -and $ExcludeEventId -contains $event.Id) {
+        if ($hasExcludeEventId -and $ExcludeEventId -contains $event.Id) {
             $filteredCount++
             continue
         }
         
-        # FILTER 2: Search/Exclude (content-based filtering)
-        if ($Search.Count -gt 0 -or $Exclude.Count -gt 0) {
+        # FILTER 2: ProcessID filtering (additive with Search)
+        if ($hasProcessIDFilter) {
+            # Fast path: direct containment check (null ProcessId will never match)
+            if ($ProcessID -notcontains $event.ProcessId) {
+                $filteredCount++
+                continue
+            }
+        }
+        
+        # FILTER 3: ThreadID filtering (additive with Search)
+        if ($hasThreadIDFilter) {
+            # Fast path: direct containment check (null ThreadId will never match)
+            if ($ThreadID -notcontains $event.ThreadId) {
+                $filteredCount++
+                continue
+            }
+        }
+        
+        # FILTER 4: Search/Exclude (content-based filtering)
+        if ($hasSearchOrExclude) {
             if (-not (Test-EventMatches -Event $event -Search $Search -Exclude $Exclude -SearchXMLEnabled $SearchXML)) {
                 $filteredCount++
                 continue
@@ -15192,27 +15405,18 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
 
     # Add matched strings to events - ALWAYS recalculate for current search
     # This is done after cache retrieval to ensure search strings match current query
-    if ($Search.Count -gt 0) {
-        foreach ($key in $allEvents.Keys) {
-            $event = $allEvents[$key]
-            # ALWAYS recalculate - don't check if property exists
-            # Search strings may have changed since event was cached
+    $hasSearch = $Search.Count -gt 0
+    
+    foreach ($key in $allEvents.Keys) {
+        $event = $allEvents[$key]
+        
+        if ($hasSearch) {
+            # ALWAYS recalculate - search strings may have changed since event was cached
             $matchInfo = Get-MatchedStrings -Event $event -Search $Search -SearchXMLEnabled $SearchXML
-            
-            # Remove old property if it exists, then add new one
-            if ($event.PSObject.Properties['MatchedStrings']) {
-                $event.PSObject.Properties.Remove('MatchedStrings')
-            }
             $event | Add-Member -MemberType NoteProperty -Name "MatchedStrings" -Value $matchInfo -Force
         }
-    }
-    else {
-        # No search strings - ensure all events have empty MatchedStrings
-        foreach ($key in $allEvents.Keys) {
-            $event = $allEvents[$key]
-            if ($event.PSObject.Properties['MatchedStrings']) {
-                $event.PSObject.Properties.Remove('MatchedStrings')
-            }
+        else {
+            # No search strings - set empty
             $event | Add-Member -MemberType NoteProperty -Name "MatchedStrings" -Value "" -Force
         }
     }
@@ -15548,6 +15752,16 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
 
             Write-Host "Event ID : " -NoNewline -ForegroundColor Yellow
             Write-Host $logEvent.Id -ForegroundColor White
+            
+            # Show PID/TID if they exist on the event (helpful for debugging)
+            if ($null -ne $logEvent.ProcessId) {
+                Write-Host "PID      : " -NoNewline -ForegroundColor Yellow
+                Write-Host $logEvent.ProcessId -ForegroundColor White
+            }
+            if ($null -ne $logEvent.ThreadId) {
+                Write-Host "TID      : " -NoNewline -ForegroundColor Yellow
+                Write-Host $logEvent.ThreadId -ForegroundColor White
+            }
         
             # Always show Match field if Search was specified
             if ($Search.Count -gt 0) {
