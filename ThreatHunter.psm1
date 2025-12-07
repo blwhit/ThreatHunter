@@ -5,14 +5,14 @@
 # [ Module Manifest ]
 # ======================
 # [X] Hunt-Persistence
-# [X] Hunt-Logs
-# [X] Hunt-ForensicDump
+# [] Hunt-Logs
+# [] Hunt-ForensicDump
 # [X] Hunt-Browser
-# [X] Hunt-Files
+# [] Hunt-Files
 # [X] Hunt-VirusTotal
-# [X] Hunt-Services
-# [X] Hunt-Tasks
-# [X] Hunt-Registry
+# [] Hunt-Services
+# [] Hunt-Tasks
+# [] Hunt-Registry
 # -----------------------------
 
 #   Function Reviews and Future Features:
@@ -21022,14 +21022,26 @@ function Hunt-Tasks {
     Example: -Path "\" returns only root-level tasks (no subdirectories).
 
     .PARAMETER StartDate
-    Filter tasks by creation or modification date. Accepts multiple formats:
+    Filter tasks by creation or modification date (start of range). Accepts multiple formats:
     - Relative: "7D" (days), "24H" (hours), "30M" (minutes)
     - Absolute: "2024-01-01" or any valid datetime string
     - Special: "now" for current time
     Filters based on task file modified date, task file created date, or last run time.
+    When used, displays Modified date in output for reference.
+    
+    .PARAMETER EndDate
+    Filter tasks by creation or modification date (end of range). Accepts multiple formats:
+    - Relative: "7D" (days), "24H" (hours), "30M" (minutes)
+    - Absolute: "2024-01-01" or any valid datetime string
+    - Special: "now" for current time (default if not specified)
+    Use with -StartDate to create a date range filter.
     
     .PARAMETER IncludeDisabled  
     Include disabled tasks in the analysis. By default, disabled tasks are excluded.
+
+    .PARAMETER SortOrder
+    Sort tasks by task file creation date. Options: NewestFirst (default) or OldestFirst.
+    Tasks without creation dates appear last in NewestFirst, first in OldestFirst.
 
     .PARAMETER More
     Display all available fields including author, description, timestamps, task file details,
@@ -21085,6 +21097,22 @@ function Hunt-Tasks {
     Hunt-Tasks -StartDate "2024-12-01" -Search "*update*"
     Find tasks containing "update" modified after December 1, 2024 with concise output.
 
+    .EXAMPLE
+    Hunt-Tasks -StartDate "7D" -EndDate "now"
+    Display tasks modified in the last 7 days with Modified date shown.
+
+    .EXAMPLE
+    Hunt-Tasks -StartDate "2024-12-01" -EndDate "2024-12-07" -More
+    Show tasks modified between December 1-7, 2024 with full details.
+
+    .EXAMPLE
+    Hunt-Tasks -SortOrder OldestFirst -More
+    Display all tasks sorted by oldest task file creation date first with full details.
+
+    .EXAMPLE
+    Hunt-Tasks -Path "\" -SortOrder NewestFirst
+    Display root-level tasks sorted by newest creation date first.
+
     .NOTES
     Requirements: PowerShell 5.0+, Windows
     Privileges: Administrator recommended for complete task enumeration
@@ -21104,7 +21132,14 @@ function Hunt-Tasks {
         [string]$StartDate = "",
 
         [Parameter(Mandatory = $false)]
+        [string]$EndDate = "",
+
+        [Parameter(Mandatory = $false)]
         [switch]$IncludeDisabled,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('NewestFirst', 'OldestFirst')]
+        [string]$SortOrder = 'NewestFirst',
 
         [Parameter(Mandatory = $false)]
         [switch]$More,
@@ -21130,7 +21165,7 @@ function Hunt-Tasks {
         # Progress tracking
         $script:TotalTasks = 0
         $script:ProcessedTasks = 0
-        $script:TaskResults = @()
+        $script:TaskResults = [System.Collections.Generic.List[PSObject]]::new()
 
         # Helper function to convert date input to DateTime
         function ConvertTo-DateTime {
@@ -21183,6 +21218,7 @@ function Hunt-Tasks {
                 $ScriptFile,
                 $Arguments,
                 $TriggerTypes,
+                $TriggerObjects,
                 $TaskInfo,
                 $RunAsUser,
                 $LogonType,
@@ -21203,6 +21239,7 @@ function Hunt-Tasks {
                 TaskFilePath       = $TaskFileDetails.Path
                 TaskFileExists     = $TaskFileDetails.Exists
                 TaskFileSHA256     = $TaskFileDetails.SHA256
+                TaskFileCreated    = $TaskFileDetails.Created
                 TaskFileModified   = $TaskFileDetails.Modified
                 ExecutablePath     = $ResolvedExecutable
                 ExecutableExists   = if ($ExecutableDetails) { $ExecutableDetails.Exists } else { $false }
@@ -21214,6 +21251,7 @@ function Hunt-Tasks {
                 ScriptFileSHA256   = if ($ScriptFileDetails) { $ScriptFileDetails.SHA256 } else { 'N/A' }
                 WorkingDirectory   = if ($WorkingDirDetails) { $WorkingDirDetails.Path } else { $null }
                 TriggerTypes       = $TriggerTypes -join ', '
+                Triggers           = $TriggerObjects
                 Hostname           = $env:COMPUTERNAME
             }
         }
@@ -21312,10 +21350,9 @@ function Hunt-Tasks {
                 "C:\Windows",
                 "C:\Program Files\Windows NT\Accessories",
                 "C:\Program Files\Common Files\Microsoft Shared",
-                "C:\Windows\System32\WindowsPowerShell\v1.0\",
-                "C:\Windows\SysWOW64\WindowsPowerShell\v1.0\",
-                "C:\Users\<YourUsername>\AppData\Local\Microsoft\PowerShell\7\",
-                "C:\Program Files\PowerShell\7\"
+                "C:\Windows\System32\WindowsPowerShell\v1.0",
+                "C:\Windows\SysWOW64\WindowsPowerShell\v1.0",
+                "C:\Program Files\PowerShell\7"
             )
     
             foreach ($searchPath in $searchPaths) {
@@ -21648,15 +21685,42 @@ function Hunt-Tasks {
 
             # Parse StartDate filter if specified
             $startDateFilter = $null
+            $endDateFilter = $null
+            $dateFilterActive = $false
+            
             if (-not [string]::IsNullOrWhiteSpace($StartDate)) {
                 try {
                     $startDateFilter = ConvertTo-DateTime -InputValue $StartDate
+                    $dateFilterActive = $true
                     Write-Verbose "[INFO]: Filtering tasks modified/created after: $($startDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
                 }
                 catch {
                     Write-Warning "Invalid StartDate format: $StartDate. Ignoring date filter."
                     Write-Verbose "[ERROR]: $($_.Exception.Message)"
                 }
+            }
+            
+            # Parse EndDate filter if specified (defaults to now if StartDate provided but EndDate not)
+            if ($dateFilterActive) {
+                if (-not [string]::IsNullOrWhiteSpace($EndDate)) {
+                    try {
+                        $endDateFilter = ConvertTo-DateTime -InputValue $EndDate
+                        Write-Verbose "[INFO]: Filtering tasks modified/created before: $($endDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
+                    }
+                    catch {
+                        Write-Warning "Invalid EndDate format: $EndDate. Using current time as end date."
+                        $endDateFilter = Get-Date
+                    }
+                }
+                else {
+                    # Default to now if StartDate specified but EndDate not
+                    $endDateFilter = Get-Date
+                    Write-Verbose "[INFO]: EndDate not specified, using current time: $($endDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
+                }
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($EndDate)) {
+                # EndDate specified without StartDate
+                Write-Warning "EndDate specified without StartDate. EndDate will be ignored."
             }
             
             # Sort tasks by TaskPath alphabetically (like Get-ScheduledTask), then by TaskName
@@ -21727,8 +21791,8 @@ function Hunt-Tasks {
                         Write-Verbose "Error retrieving principal information for task '$($task.TaskName)': $($_.Exception.Message)"
                     }
 
-                    # Apply StartDate filter if specified
-                    if ($null -ne $startDateFilter) {
+                    # Apply StartDate/EndDate filter if specified
+                    if ($dateFilterActive) {
                         $taskDate = $null
                         
                         # Priority 1: Task file modified date
@@ -21744,13 +21808,20 @@ function Hunt-Tasks {
                             $taskDate = $taskInfo.LastRunTime
                         }
                         
-                        # Skip task if it's older than the filter date
-                        if ($null -ne $taskDate -and $taskDate -lt $startDateFilter) {
-                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - date $($taskDate.ToString('yyyy-MM-dd HH:mm:ss')) is before filter date"
+                        # Skip if no valid date found
+                        if ($null -eq $taskDate) {
+                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - no valid date found for comparison"
                             continue
                         }
-                        elseif ($null -eq $taskDate) {
-                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - no valid date found for comparison"
+                        
+                        # Skip if outside date range
+                        if ($taskDate -lt $startDateFilter) {
+                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - date $($taskDate.ToString('yyyy-MM-dd HH:mm:ss')) is before start date"
+                            continue
+                        }
+                        
+                        if ($null -ne $endDateFilter -and $taskDate -gt $endDateFilter) {
+                            Write-Verbose "[FILTER]: Skipping task '$($task.TaskName)' - date $($taskDate.ToString('yyyy-MM-dd HH:mm:ss')) is after end date"
                             continue
                         }
                     }
@@ -21812,13 +21883,18 @@ function Hunt-Tasks {
                                 }
                             }
                             
-                            # Get trigger types for search
+                            # Get trigger types for search and storage
                             $triggerTypes = @()
+                            $triggerObjects = @()
                             if ($task.Triggers) {
                                 foreach ($trigger in $task.Triggers) {
                                     try {
-                                        $triggerType = $Trigger.CimClass.CimClassName -replace 'MSFT_Task', '' -replace 'Trigger', ''
-                                        $triggerTypes += $triggerType
+                                        $triggerType = $trigger.CimClass.CimClassName -replace 'MSFT_Task', '' -replace 'Trigger', ''
+                                        # Only add non-empty trigger types
+                                        if (-not [string]::IsNullOrWhiteSpace($triggerType)) {
+                                            $triggerTypes += $triggerType
+                                            $triggerObjects += $trigger
+                                        }
                                     }
                                     catch {
                                         # Continue if trigger parsing fails
@@ -21860,322 +21936,10 @@ function Hunt-Tasks {
                             }
                             
                             $matchCount++
-                            # Create result object for PassThru or CSV export
-                            if ($PassThru -or (-not [string]::IsNullOrWhiteSpace($OutputCSV))) {
-                                $taskResult = New-TaskResult -Task $task -TaskFileDetails $taskFileDetails -ExecutableDetails $executableDetails -ScriptFileDetails $scriptFileDetails -WorkingDirDetails $workingDirDetails -ResolvedExecutable $resolvedExecutable -ScriptFile $scriptFile -Arguments $arguments -TriggerTypes $triggerTypes -TaskInfo $taskInfo -RunAsUser $runAsUser -LogonType $logonType -RunLevel $runLevel
-                                $script:TaskResults += $taskResult
-                            }
-
-                            # Display results only if not -Quiet
-                            if (-not $Quiet) {
-                                Write-Host ""
-                                Write-Host "----------------------------------------" -ForegroundColor Gray
-                                
-                                # Core fields - always displayed
-                                Write-Host "Task Name    : " -NoNewline -ForegroundColor Yellow
-                                Write-Host $task.TaskName -ForegroundColor Cyan
-
-                                if ($task.TaskPath) {
-                                    Write-Host "Task Path    : " -NoNewline -ForegroundColor Yellow
-                                    Write-Host $task.TaskPath -ForegroundColor White
-                                }
-
-                                if ($task.State) {
-                                    Write-Host "State        : " -NoNewline -ForegroundColor Yellow
-                                    Write-Host $task.State -ForegroundColor DarkGray
-                                }
-                                
-                                # Display principal information - always shown
-                                if ($runAsUser -ne 'N/A') {
-                                    Write-Host "Run As       : " -NoNewline -ForegroundColor Yellow
-                                    # Highlight privileged accounts
-                                    if ($runAsUser -eq 'SYSTEM' -or $runAsUser -eq 'NT AUTHORITY\SYSTEM') {
-                                        Write-Host $runAsUser -ForegroundColor Magenta
-                                    }
-                                    elseif ($runLevel -eq 'Highest') {
-                                        Write-Host "$runAsUser " -NoNewline -ForegroundColor Cyan
-                                        Write-Host "(Elevated)" -ForegroundColor Red
-                                    }
-                                    else {
-                                        Write-Host $runAsUser -ForegroundColor Cyan
-                                    }
-                                }
-
-                                # Display Execute, Arguments, SHA256 only when NOT using -More
-                                if (-not $More) {
-                                    if ($resolvedExecutable) {
-                                        Write-Host "Execute      : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $resolvedExecutable -ForegroundColor Red
-                                    }
-
-                                    if ($arguments) {
-                                        Write-Host "Arguments    : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $arguments -ForegroundColor DarkYellow
-                                    }
-
-                                    if ($executableDetails -and $executableDetails.SHA256 -ne 'N/A') {
-                                        Write-Host "SHA256       : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $executableDetails.SHA256 -ForegroundColor Gray
-                                    }
-                                }
-
-                                # Additional fields - only with -More switch
-                                if ($More) {
-                                    # Extended principal information
-                                    if ($logonType -ne 'N/A') {
-                                        Write-Host "Logon Type   : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $logonType -ForegroundColor DarkGray
-                                    }
-                                    if ($runLevel -ne 'N/A') {
-                                        Write-Host "Run Level    : " -NoNewline -ForegroundColor Yellow
-                                        if ($runLevel -eq 'Highest') {
-                                            Write-Host $runLevel -ForegroundColor Red
-                                        }
-                                        else {
-                                            Write-Host $runLevel -ForegroundColor DarkGray
-                                        }
-                                    }
-                                    
-                                    if ($task.Author) {
-                                        Write-Host "Author       : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $task.Author -ForegroundColor White
-                                    }
-
-                                    if ($task.Description) {
-                                        Write-Host "Description  : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $task.Description -ForegroundColor DarkGray
-                                    }
-
-                                    if ($null -ne $taskInfo) {
-                                        if ($taskInfo.LastRunTime -and $taskInfo.LastRunTime -ne [DateTime]::MinValue) {
-                                            Write-Host "Last Run     : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $taskInfo.LastRunTime) -ForegroundColor DarkGray
-                                        }
-                                        if ($taskInfo.NextRunTime -and $taskInfo.NextRunTime -ne [DateTime]::MinValue) {
-                                            Write-Host "Next Run     : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $taskInfo.NextRunTime) -ForegroundColor DarkGray
-                                        }
-                                        if ($taskInfo.NumberOfMissedRuns -and $taskInfo.NumberOfMissedRuns -ne 0) {
-                                            Write-Host "Run Count    : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host $taskInfo.NumberOfMissedRuns -ForegroundColor DarkGray
-                                        }
-                                    }
-
-                                    # Task file information
-                                    Write-Host ""
-                                    Write-Host "--- Task File ---" -ForegroundColor DarkCyan
-                                    if ($taskFileDetails.Exists) {
-                                        Write-Host "Path         : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $taskFileDetails.Path -ForegroundColor White
-
-                                        if ($taskFileDetails.Created -ne 'N/A') {
-                                            Write-Host "Created      : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $taskFileDetails.Created) -ForegroundColor DarkGray
-                                        }
-                                        if ($taskFileDetails.Modified -ne 'N/A') {
-                                            Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $taskFileDetails.Modified) -ForegroundColor DarkGray
-                                        }
-                                        if ($taskFileDetails.Accessed -ne 'N/A') {
-                                            Write-Host "Accessed     : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $taskFileDetails.Accessed) -ForegroundColor DarkGray
-                                        }
-                                        if ($taskFileDetails.SHA256 -ne 'N/A') {
-                                            Write-Host "SHA256       : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host $taskFileDetails.SHA256 -ForegroundColor Gray
-                                        }
-                                    }
-                                    else {
-                                        Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host "Task File Not Found" -ForegroundColor Red
-                                    }
-
-                                    # Executable information
-                                    Write-Host ""
-                                    Write-Host "--- Executable ---" -ForegroundColor DarkCyan
-                                    if ($resolvedExecutable) {
-                                        Write-Host "Execute      : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $resolvedExecutable -ForegroundColor Red
-                                        
-                                        if ($arguments) {
-                                            Write-Host "Arguments    : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host $arguments -ForegroundColor DarkYellow
-                                        }
-                                        
-                                        if ($executableDetails -and $executableDetails.Exists) {
-                                            if ($executableDetails.SHA256 -ne 'N/A') {
-                                                Write-Host "SHA256       : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host $executableDetails.SHA256 -ForegroundColor Gray
-                                            }
-                                            if ($executableDetails.Created -ne 'N/A') {
-                                                Write-Host "Created      : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host (Format-DateTime -DateTime $executableDetails.Created) -ForegroundColor DarkGray
-                                            }
-                                            if ($executableDetails.Modified -ne 'N/A') {
-                                                Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host (Format-DateTime -DateTime $executableDetails.Modified) -ForegroundColor DarkGray
-                                            }
-                                            if ($executableDetails.Accessed -ne 'N/A') {
-                                                Write-Host "Accessed     : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host (Format-DateTime -DateTime $executableDetails.Accessed) -ForegroundColor DarkGray
-                                            }
-                                            if ($executableDetails.Size -ne 'N/A') {
-                                                Write-Host "Size         : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host "$($executableDetails.Size) MB" -ForegroundColor DarkGray
-                                            }
-                                        }
-                                        else {
-                                            Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host "Executable Not Found" -ForegroundColor Red
-                                        }
-                                    }
-                                    else {
-                                        Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host "No Executable Information Available" -ForegroundColor DarkGray
-                                    }
-
-                                    # Script file information
-                                    if ($scriptFile -and $scriptFileDetails) {
-                                        Write-Host ""
-                                        Write-Host "--- Exec File ---" -ForegroundColor DarkCyan
-                                        Write-Host "Exec File    : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $scriptFile -ForegroundColor Red
-
-                                        if ($scriptFileDetails.Exists) {
-                                            if ($scriptFileDetails.Created -ne 'N/A') {
-                                                Write-Host "Created      : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host (Format-DateTime -DateTime $scriptFileDetails.Created) -ForegroundColor DarkGray
-                                            }
-                                            if ($scriptFileDetails.Modified -ne 'N/A') {
-                                                Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host (Format-DateTime -DateTime $scriptFileDetails.Modified) -ForegroundColor DarkGray
-                                            }
-                                            if ($scriptFileDetails.Accessed -ne 'N/A') {
-                                                Write-Host "Accessed     : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host (Format-DateTime -DateTime $scriptFileDetails.Accessed) -ForegroundColor DarkGray
-                                            }
-                                            if ($scriptFileDetails.Size -ne 'N/A') {
-                                                Write-Host "Size         : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host "$($scriptFileDetails.Size) MB" -ForegroundColor DarkGray
-                                            }
-                                            if ($scriptFileDetails.SHA256 -ne 'N/A') {
-                                                Write-Host "Exec SHA256  : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host $scriptFileDetails.SHA256 -ForegroundColor Gray
-                                            }
-                                        }
-                                        else {
-                                            Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host "Script File Not Found" -ForegroundColor Red
-                                        }
-                                    }
-
-                                    # Working directory information
-                                    if ($expandedWorkingDir -and $expandedWorkingDir -ne $resolvedExecutable -and $expandedWorkingDir -ne $scriptFile -and $workingDirDetails -and $workingDirDetails.Exists) {
-                                        Write-Host ""
-                                        Write-Host "--- Working Directory ---" -ForegroundColor DarkCyan
-                                        Write-Host "Path         : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host $workingDirDetails.Path -ForegroundColor Cyan
-
-                                        if ($workingDirDetails.Created -ne 'N/A') {
-                                            Write-Host "Created      : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $workingDirDetails.Created) -ForegroundColor DarkGray
-                                        }
-                                        if ($workingDirDetails.Modified -ne 'N/A') {
-                                            Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $workingDirDetails.Modified) -ForegroundColor DarkGray
-                                        }
-                                        if ($workingDirDetails.Accessed -ne 'N/A') {
-                                            Write-Host "Accessed     : " -NoNewline -ForegroundColor Yellow
-                                            Write-Host (Format-DateTime -DateTime $workingDirDetails.Accessed) -ForegroundColor DarkGray
-                                        }
-                                    }
-
-                                    # Triggers
-                                    Write-Host ""
-                                    Write-Host "--- Triggers ---" -ForegroundColor DarkCyan
-                                    if ($task.Triggers -and $task.Triggers.Count -gt 0) {
-                                        $triggerCount = 0
-                                        foreach ($trigger in $task.Triggers) {
-                                            try {
-                                                $triggerCount++
-                                                
-                                                $triggerProperties = $trigger | Get-Member -MemberType Property | Select-Object -ExpandProperty Name
-                                                
-                                                if ($task.Triggers.Count -gt 1) {
-                                                    Write-Host ""
-                                                    Write-Host "Trigger #$triggerCount" -ForegroundColor Cyan
-                                                }
-                                                
-                                                # First pass - collect and display non-Repetition properties
-                                                $repetitionValue = $null
-                                                foreach ($prop in $triggerProperties) {
-                                                    try {
-                                                        $value = $trigger.$prop
-                                                        
-                                                        if ($null -ne $value -and $value -ne '') {
-                                                            # Store Repetition for second pass
-                                                            if ($prop -eq 'Repetition' -and $value.GetType().Name -eq 'CimInstance') {
-                                                                $repetitionValue = $value
-                                                                continue
-                                                            }
-                                                            
-                                                            # Display all other properties normally
-                                                            $propName = $prop.PadRight(18)
-                                                            Write-Host "$propName : " -NoNewline -ForegroundColor Yellow
-                                                            
-                                                            if ($prop -eq 'Enabled' -and $value -eq $false) {
-                                                                Write-Host $value -ForegroundColor Red
-                                                            }
-                                                            elseif ($prop -eq 'CimClass') {
-                                                                Write-Host $value.CimClassName -ForegroundColor DarkGray
-                                                            }
-                                                            else {
-                                                                Write-Host $value -ForegroundColor DarkGray
-                                                            }
-                                                        }
-                                                    }
-                                                    catch {
-                                                        # Skip properties that can't be accessed
-                                                    }
-                                                }
-                                                
-                                                # Second pass - display Repetition and its expanded properties
-                                                if ($null -ne $repetitionValue) {
-                                                    try {
-                                                        Write-Host "Repetition         : " -NoNewline -ForegroundColor Yellow
-                                                        Write-Host $repetitionValue.CimClass.CimClassName -ForegroundColor DarkGray
-                                                        
-                                                        # Expand repetition properties on separate indented lines
-                                                        if ($repetitionValue.Interval) {
-                                                            Write-Host "Interval           : " -NoNewline -ForegroundColor Yellow
-                                                            Write-Host $repetitionValue.Interval -ForegroundColor DarkGray
-                                                        }
-                                                        if ($repetitionValue.Duration) {
-                                                            Write-Host "Duration           : " -NoNewline -ForegroundColor Yellow
-                                                            Write-Host $repetitionValue.Duration -ForegroundColor DarkGray
-                                                        }
-                                                        if ($null -ne $repetitionValue.StopAtDurationEnd) {
-                                                            Write-Host "StopAtDurationEnd  : " -NoNewline -ForegroundColor Yellow
-                                                            Write-Host $repetitionValue.StopAtDurationEnd -ForegroundColor DarkGray
-                                                        }
-                                                    }
-                                                    catch {
-                                                        # Continue if repetition properties can't be accessed
-                                                    }
-                                                }
-                                            }
-                                            catch {
-                                                Write-Host "Trigger #$triggerCount : " -NoNewline -ForegroundColor Yellow
-                                                Write-Host "Parse error" -ForegroundColor Red
-                                            }
-                                        }
-                                    }
-                                    else {
-                                        Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
-                                        Write-Host "No Triggers Found" -ForegroundColor DarkGray
-                                    }
-                                }
-                            }
+                            
+                            # Always create result object - needed for display, PassThru, and CSV
+                            $taskResult = New-TaskResult -Task $task -TaskFileDetails $taskFileDetails -ExecutableDetails $executableDetails -ScriptFileDetails $scriptFileDetails -WorkingDirDetails $workingDirDetails -ResolvedExecutable $resolvedExecutable -ScriptFile $scriptFile -Arguments $arguments -TriggerTypes $triggerTypes -TriggerObjects $triggerObjects -TaskInfo $taskInfo -RunAsUser $runAsUser -LogonType $logonType -RunLevel $runLevel
+                            $script:TaskResults.Add($taskResult)
                         }
                         catch {
                             Write-Verbose "Error processing action for task '$($task.TaskName)': $($_.Exception.Message)"
@@ -22187,6 +21951,365 @@ function Hunt-Tasks {
                     Write-Verbose "Error processing task '$($task.TaskName)': $($_.Exception.Message)"
                     continue
                 }
+            }
+
+            # Sort results by task file creation date
+            if ($script:TaskResults.Count -gt 0) {
+                try {
+                    if ($SortOrder -eq 'NewestFirst') {
+                        # Sort descending - newest first, nulls/N/A last
+                        $script:TaskResults = [System.Collections.Generic.List[PSObject]]::new(
+                            ($script:TaskResults | Sort-Object { 
+                                if ($_.TaskFileCreated -is [DateTime]) { 
+                                    $_.TaskFileCreated
+                                } 
+                                else { 
+                                    [DateTime]::MinValue 
+                                }
+                            } -Descending)
+                        )
+                    }
+                    else {
+                        # Sort ascending - oldest first, nulls/N/A first
+                        $script:TaskResults = [System.Collections.Generic.List[PSObject]]::new(
+                            ($script:TaskResults | Sort-Object { 
+                                if ($_.TaskFileCreated -is [DateTime]) { 
+                                    $_.TaskFileCreated
+                                } 
+                                else { 
+                                    [DateTime]::MaxValue 
+                                }
+                            })
+                        )
+                    }
+                }
+                catch {
+                    Write-Verbose "Error sorting results: $($_.Exception.Message)"
+                    # Continue with unsorted results
+                }
+            }
+
+            # Display sorted results
+            if (-not $Quiet -and $script:TaskResults.Count -gt 0) {
+                Write-Host ""
+                Write-Host "[+] Displaying $($script:TaskResults.Count) task matches (sorted by $SortOrder)..." -ForegroundColor Cyan
+                
+                foreach ($result in $script:TaskResults) {
+                    try {
+                        Write-Host ""
+                        Write-Host "----------------------------------------" -ForegroundColor Gray
+                        
+                        # Core fields - always displayed
+                        Write-Host "Task Name    : " -NoNewline -ForegroundColor Yellow
+                        Write-Host $result.TaskName -ForegroundColor Cyan
+
+                        if ($result.TaskPath) {
+                            Write-Host "Task Path    : " -NoNewline -ForegroundColor Yellow
+                            Write-Host $result.TaskPath -ForegroundColor White
+                        }
+
+                        if ($result.State) {
+                            Write-Host "State        : " -NoNewline -ForegroundColor Yellow
+                            Write-Host $result.State -ForegroundColor DarkGray
+                        }
+                        
+                        # Display principal information - always shown
+                        if ($result.RunAsUser -ne 'N/A') {
+                            Write-Host "Run As       : " -NoNewline -ForegroundColor Yellow
+                            # Highlight privileged accounts
+                            if ($result.RunAsUser -eq 'SYSTEM' -or $result.RunAsUser -eq 'NT AUTHORITY\SYSTEM') {
+                                Write-Host $result.RunAsUser -ForegroundColor White
+                            }
+                            elseif ($result.RunLevel -eq 'Highest') {
+                                Write-Host "$($result.RunAsUser) " -NoNewline -ForegroundColor White
+                                Write-Host "(Elevated)" -ForegroundColor White
+                            }
+                            else {
+                                Write-Host $result.RunAsUser -ForegroundColor White
+                            }
+                        }
+
+                        # Display Execute, Arguments, SHA256, Created only when NOT using -More
+                        if (-not $More) {
+                            if ($result.ExecutablePath) {
+                                Write-Host "Execute      : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.ExecutablePath -ForegroundColor Red
+                            }
+
+                            if ($result.Arguments) {
+                                Write-Host "Arguments    : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.Arguments -ForegroundColor DarkYellow
+                            }
+
+                            if ($result.ExecutableSHA256 -and $result.ExecutableSHA256 -ne 'N/A') {
+                                Write-Host "SHA256       : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.ExecutableSHA256 -ForegroundColor DarkGray
+                            }
+                            
+                            if ($result.TaskFileCreated -and $result.TaskFileCreated -ne 'N/A') {
+                                Write-Host "Created      : " -NoNewline -ForegroundColor Yellow
+                                if ($result.TaskFileCreated -is [DateTime]) {
+                                    Write-Host $result.TaskFileCreated.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                                }
+                                else {
+                                    Write-Host (Format-DateTime -DateTime $result.TaskFileCreated) -ForegroundColor DarkGray
+                                }
+                            }
+                            
+                            # Show Modified date when date filtering is active
+                            if ($dateFilterActive -and $result.TaskFileModified -and $result.TaskFileModified -ne 'N/A') {
+                                Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
+                                if ($result.TaskFileModified -is [DateTime]) {
+                                    Write-Host $result.TaskFileModified.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                                }
+                                else {
+                                    Write-Host (Format-DateTime -DateTime $result.TaskFileModified) -ForegroundColor DarkGray
+                                }
+                            }
+                        }
+
+                        # Additional fields - only with -More switch
+                        if ($More) {
+                            # Extended principal information
+                            if ($result.LogonType -ne 'N/A') {
+                                Write-Host "Logon Type   : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.LogonType -ForegroundColor DarkGray
+                            }
+                            if ($result.RunLevel -ne 'N/A') {
+                                Write-Host "Run Level    : " -NoNewline -ForegroundColor Yellow
+                                if ($result.RunLevel -eq 'Highest') {
+                                    Write-Host $result.RunLevel -ForegroundColor Red
+                                }
+                                else {
+                                    Write-Host $result.RunLevel -ForegroundColor DarkGray
+                                }
+                            }
+                            
+                            if ($result.Author) {
+                                Write-Host "Author       : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.Author -ForegroundColor White
+                            }
+
+                            if ($result.Description) {
+                                Write-Host "Description  : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.Description -ForegroundColor DarkGray
+                            }
+
+                            if ($result.LastRunTime -and $result.LastRunTime -is [DateTime] -and $result.LastRunTime -ne [DateTime]::MinValue) {
+                                Write-Host "Last Run     : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                            }
+                            if ($result.NextRunTime -and $result.NextRunTime -is [DateTime] -and $result.NextRunTime -ne [DateTime]::MinValue) {
+                                Write-Host "Next Run     : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                            }
+
+                            # Task file information
+                            Write-Host ""
+                            Write-Host "--- Task File ---" -ForegroundColor DarkCyan
+                            if ($result.TaskFileExists) {
+                                Write-Host "Path         : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.TaskFilePath -ForegroundColor White
+
+                                if ($result.TaskFileCreated -and $result.TaskFileCreated -ne 'N/A') {
+                                    Write-Host "Created      : " -NoNewline -ForegroundColor Yellow
+                                    if ($result.TaskFileCreated -is [DateTime]) {
+                                        Write-Host $result.TaskFileCreated.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                                    }
+                                    else {
+                                        Write-Host (Format-DateTime -DateTime $result.TaskFileCreated) -ForegroundColor DarkGray
+                                    }
+                                }
+                                if ($result.TaskFileModified -and $result.TaskFileModified -ne 'N/A') {
+                                    Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
+                                    if ($result.TaskFileModified -is [DateTime]) {
+                                        Write-Host $result.TaskFileModified.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                                    }
+                                    else {
+                                        Write-Host (Format-DateTime -DateTime $result.TaskFileModified) -ForegroundColor DarkGray
+                                    }
+                                }
+                                if ($result.TaskFileSHA256 -and $result.TaskFileSHA256 -ne 'N/A') {
+                                    Write-Host "SHA256       : " -NoNewline -ForegroundColor Yellow
+                                    Write-Host $result.TaskFileSHA256 -ForegroundColor Gray
+                                }
+                            }
+                            else {
+                                Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
+                                Write-Host "Task File Not Found" -ForegroundColor Red
+                            }
+
+                            # Executable information - always display header
+                            Write-Host ""
+                            Write-Host "--- Executable ---" -ForegroundColor DarkCyan
+                            if ($result.ExecutablePath) {
+                                Write-Host "Execute      : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.ExecutablePath -ForegroundColor Red
+                                
+                                if ($result.Arguments) {
+                                    Write-Host "Arguments    : " -NoNewline -ForegroundColor Yellow
+                                    Write-Host $result.Arguments -ForegroundColor DarkYellow
+                                }
+                                
+                                if ($result.ExecutableExists) {
+                                    if ($result.ExecutableSHA256 -and $result.ExecutableSHA256 -ne 'N/A') {
+                                        Write-Host "SHA256       : " -NoNewline -ForegroundColor Yellow
+                                        Write-Host $result.ExecutableSHA256 -ForegroundColor Gray
+                                    }
+                                    if ($result.ExecutableModified -and $result.ExecutableModified -ne 'N/A') {
+                                        Write-Host "Modified     : " -NoNewline -ForegroundColor Yellow
+                                        if ($result.ExecutableModified -is [DateTime]) {
+                                            Write-Host $result.ExecutableModified.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor DarkGray
+                                        }
+                                        else {
+                                            Write-Host (Format-DateTime -DateTime $result.ExecutableModified) -ForegroundColor DarkGray
+                                        }
+                                    }
+                                }
+                                else {
+                                    Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
+                                    Write-Host "Executable Not Found" -ForegroundColor Red
+                                }
+                            }
+                            else {
+                                Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
+                                Write-Host "No Executable Information Available" -ForegroundColor DarkGray
+                            }
+
+                            # Script file information
+                            if ($result.ScriptFilePath -and $result.ScriptFileExists) {
+                                Write-Host ""
+                                Write-Host "--- Exec File ---" -ForegroundColor DarkCyan
+                                Write-Host "Exec File    : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.ScriptFilePath -ForegroundColor Red
+
+                                if ($result.ScriptFileSHA256 -and $result.ScriptFileSHA256 -ne 'N/A') {
+                                    Write-Host "Exec SHA256  : " -NoNewline -ForegroundColor Yellow
+                                    Write-Host $result.ScriptFileSHA256 -ForegroundColor Gray
+                                }
+                            }
+
+                            # Working directory information
+                            if ($result.WorkingDirectory) {
+                                Write-Host ""
+                                Write-Host "--- Working Directory ---" -ForegroundColor DarkCyan
+                                Write-Host "Path         : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.WorkingDirectory -ForegroundColor Cyan
+                            }
+
+                            # Triggers with full details
+                            Write-Host ""
+                            Write-Host "--- Triggers ---" -ForegroundColor DarkCyan
+                            if ($result.Triggers -and $result.Triggers.Count -gt 0) {
+                                $triggerCount = 0
+                                foreach ($trigger in $result.Triggers) {
+                                    try {
+                                        $triggerCount++
+                                        
+                                        $triggerProperties = $trigger | Get-Member -MemberType Property | Select-Object -ExpandProperty Name
+                                        
+                                        if ($result.Triggers.Count -gt 1) {
+                                            Write-Host ""
+                                            Write-Host "Trigger #$triggerCount" -ForegroundColor Cyan
+                                        }
+                                        
+                                        # First pass - collect and display non-Repetition properties
+                                        $repetitionValue = $null
+                                        $propertiesDisplayed = $false
+                                        foreach ($prop in $triggerProperties) {
+                                            try {
+                                                $value = $trigger.$prop
+                                                
+                                                if ($null -ne $value -and $value -ne '') {
+                                                    # Store Repetition for second pass
+                                                    if ($prop -eq 'Repetition' -and $value.GetType().Name -eq 'CimInstance') {
+                                                        $repetitionValue = $value
+                                                        continue
+                                                    }
+                                                    
+                                                    # Skip PSComputerName, CimInstanceProperties, and other internal properties
+                                                    if ($prop -in @('PSComputerName', 'CimInstanceProperties', 'CimSystemProperties')) {
+                                                        continue
+                                                    }
+                                                    
+                                                    # Display all other properties normally
+                                                    $propName = $prop.PadRight(18)
+                                                    Write-Host "$propName : " -NoNewline -ForegroundColor Yellow
+                                                    
+                                                    if ($prop -eq 'Enabled' -and $value -eq $false) {
+                                                        Write-Host $value -ForegroundColor Red
+                                                    }
+                                                    elseif ($prop -eq 'CimClass') {
+                                                        Write-Host $value.CimClassName -ForegroundColor DarkGray
+                                                    }
+                                                    else {
+                                                        Write-Host $value -ForegroundColor DarkGray
+                                                    }
+                                                    
+                                                    $propertiesDisplayed = $true
+                                                }
+                                            }
+                                            catch {
+                                                # Skip properties that can't be accessed
+                                            }
+                                        }
+                                        
+                                        # Second pass - display Repetition and its expanded properties
+                                        if ($null -ne $repetitionValue) {
+                                            try {
+                                                Write-Host "Repetition         : " -NoNewline -ForegroundColor Yellow
+                                                Write-Host $repetitionValue.CimClass.CimClassName -ForegroundColor DarkGray
+                                                $propertiesDisplayed = $true
+                                                
+                                                # Expand repetition properties on separate indented lines
+                                                if ($repetitionValue.Interval) {
+                                                    Write-Host "Interval           : " -NoNewline -ForegroundColor Yellow
+                                                    Write-Host $repetitionValue.Interval -ForegroundColor DarkGray
+                                                }
+                                                if ($repetitionValue.Duration) {
+                                                    Write-Host "Duration           : " -NoNewline -ForegroundColor Yellow
+                                                    Write-Host $repetitionValue.Duration -ForegroundColor DarkGray
+                                                }
+                                                if ($null -ne $repetitionValue.StopAtDurationEnd) {
+                                                    Write-Host "StopAtDurationEnd  : " -NoNewline -ForegroundColor Yellow
+                                                    Write-Host $repetitionValue.StopAtDurationEnd -ForegroundColor DarkGray
+                                                }
+                                            }
+                                            catch {
+                                                # Continue if repetition properties can't be accessed
+                                            }
+                                        }
+                                        # If no properties were displayed, show a message
+                                        if (-not $propertiesDisplayed) {
+                                            Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
+                                            Write-Host "No displayable properties" -ForegroundColor DarkGray
+                                        }
+                                    }
+                                    catch {
+                                        Write-Host "Trigger #$triggerCount : " -NoNewline -ForegroundColor Yellow
+                                        Write-Host "Parse error" -ForegroundColor Red
+                                    }
+                                }
+                            }
+                            elseif ($result.TriggerTypes) {
+                                Write-Host "Types        : " -NoNewline -ForegroundColor Yellow
+                                Write-Host $result.TriggerTypes -ForegroundColor DarkGray
+                            }
+                            else {
+                                Write-Host "Status       : " -NoNewline -ForegroundColor Yellow
+                                Write-Host "No Triggers Found" -ForegroundColor DarkGray
+                            }
+                        }
+                    }
+                    catch {
+                        Write-Verbose "Error displaying result for task '$($result.TaskName)': $($_.Exception.Message)"
+                        continue
+                    }
+                }
+            }
+            elseif (-not $Quiet) {
+                Write-Host ""
+                Write-Host "[!] No tasks matched the specified criteria." -ForegroundColor Yellow
             }
 
             # Export to CSV if requested
@@ -22216,6 +22339,7 @@ function Hunt-Tasks {
                                 TaskFilePath       = Sanitize-CSVValue $_.TaskFilePath
                                 TaskFileExists     = $_.TaskFileExists
                                 TaskFileSHA256     = Sanitize-CSVValue $_.TaskFileSHA256
+                                TaskFileCreated    = if ($_.TaskFileCreated -is [DateTime]) { $_.TaskFileCreated.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
                                 TaskFileModified   = if ($_.TaskFileModified -is [DateTime]) { $_.TaskFileModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
                                 ExecutablePath     = Sanitize-CSVValue $_.ExecutablePath
                                 ExecutableExists   = $_.ExecutableExists
@@ -22246,7 +22370,10 @@ function Hunt-Tasks {
                 }
             }
             elseif (-not [string]::IsNullOrWhiteSpace($OutputCSV) -and $script:TaskResults.Count -eq 0) {
-                Write-Warning "No results to export to CSV."
+                if (-not $Quiet) {
+                    Write-Host ""
+                    Write-Host "[!] No results to export to CSV (no tasks matched criteria)." -ForegroundColor Yellow
+                }
             }
 
             # Summary and return logic
@@ -22256,15 +22383,15 @@ function Hunt-Tasks {
                 Write-Host "----------------------------------------" -ForegroundColor Gray
             }
 
-            Write-Verbose "[INFO]: Enumerated $taskCount tasks with $matchCount actions."
+            Write-Verbose "[INFO]: Processed $taskCount tasks, found $matchCount matching results."
             if ($Search) {
                 Write-Verbose "[INFO]: Search filter applied: '$Search'" 
             }
             if ($Path) {
                 Write-Verbose "[INFO]: Path filter applied: '$Path'"
             }
-            if ($startDateFilter) {
-                Write-Verbose "[INFO]: StartDate filter applied: $($startDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
+            if ($dateFilterActive) {
+                Write-Verbose "[INFO]: Date range filter applied: $($startDateFilter.ToString('yyyy-MM-dd HH:mm:ss')) to $($endDateFilter.ToString('yyyy-MM-dd HH:mm:ss'))"
             }
             if (-not $IncludeDisabled) {
                 Write-Verbose "[INFO]: Disabled tasks excluded." 
@@ -22278,7 +22405,7 @@ function Hunt-Tasks {
 
             # Return objects only if PassThru is specified
             if ($PassThru) {
-                return $script:TaskResults
+                return $script:TaskResults.ToArray()
             }
         }
         catch {
@@ -23077,8 +23204,12 @@ function Hunt-Services {
     .PARAMETER Type
     Filter services by start type: Automatic, Manual, Disabled, Boot, System, or All.
     
+    .PARAMETER SortOrder
+    Sort services by executable last modified date. Options: NewestFirst (default) or OldestFirst.
+    Services without modification dates appear last in NewestFirst, first in OldestFirst.
+    
     .PARAMETER More
-    Display all available fields including account, description, SHA256, last modified,
+    Display all available fields including account, description, last modified date,
     dependencies, and additional metadata. Default output shows only core fields.
     
     .PARAMETER PassThru
@@ -23118,6 +23249,14 @@ function Hunt-Services {
     Hunt-Services -Type Disabled -More -OutputCSV ".\disabled_services.csv"
     Find all disabled services with full details and export to CSV.
     
+    .EXAMPLE
+    Hunt-Services -SortOrder OldestFirst -More
+    Display services sorted by oldest executable modification date first.
+    
+    .EXAMPLE
+    Hunt-Services -Search "*svchost*" -SortOrder NewestFirst
+    Find services matching "svchost" sorted by newest modifications first.
+    
     .NOTES
     Requirements: PowerShell 5.0+, Windows
     Privileges: Administrator recommended for complete service enumeration
@@ -23131,6 +23270,10 @@ function Hunt-Services {
         [Parameter(Mandatory = $false)]
         [ValidateSet('Automatic', 'Manual', 'Disabled', 'Boot', 'System', 'All')]
         [string]$Type = 'All',
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('NewestFirst', 'OldestFirst')]
+        [string]$SortOrder = 'NewestFirst',
 
         [Parameter(Mandatory = $false)]
         [switch]$More,
@@ -23449,9 +23592,45 @@ function Hunt-Services {
             Write-Host "[!] No services matched the specified criteria" -ForegroundColor Yellow
         }
         
+        # Sort results by LastModified date
+        if ($results.Count -gt 0) {
+            try {
+                if ($SortOrder -eq 'NewestFirst') {
+                    # Sort descending - newest first, nulls last
+                    $results = [System.Collections.Generic.List[PSObject]]::new(
+                        ($results | Sort-Object { 
+                            if ($_.LastModified) { 
+                                [DateTime]::ParseExact($_.LastModified, "yyyy-MM-dd HH:mm:ss", $null) 
+                            } 
+                            else { 
+                                [DateTime]::MinValue 
+                            }
+                        } -Descending)
+                    )
+                }
+                else {
+                    # Sort ascending - oldest first, nulls first
+                    $results = [System.Collections.Generic.List[PSObject]]::new(
+                        ($results | Sort-Object { 
+                            if ($_.LastModified) { 
+                                [DateTime]::ParseExact($_.LastModified, "yyyy-MM-dd HH:mm:ss", $null) 
+                            } 
+                            else { 
+                                [DateTime]::MaxValue 
+                            }
+                        })
+                    )
+                }
+            }
+            catch {
+                Write-Verbose "Error sorting results: $($_.Exception.Message)"
+                # Continue with unsorted results
+            }
+        }
+        
         # Display results
         if (-not $Quiet -and $results.Count -gt 0) {
-            Write-Host "[+] Displaying $($results.Count) service matches..." -ForegroundColor Cyan
+            #Write-Host "[+] Displaying $($results.Count) service matches..." -ForegroundColor Cyan
             
             foreach ($result in $results) {
                 Write-Host ""
@@ -23475,11 +23654,27 @@ function Hunt-Services {
                 }
                 Write-Host $result.Status -ForegroundColor $statusColor
                 
-                if ($result.CommandLine) {
+                # Smart display logic for Command Line and Executable Path
+                # Only show both if they're meaningfully different (not just quotes)
+                $showBothPaths = $true
+                if (-not $More -and $result.CommandLine -and $result.ExecutablePath) {
+                    # Normalize both paths for comparison (remove quotes and trim)
+                    $normalizedCmd = $result.CommandLine.Trim().Trim('"').Trim("'")
+                    $normalizedExe = $result.ExecutablePath.Trim().Trim('"').Trim("'")
+                    
+                    # If they're the same after normalization, only show Executable Path
+                    if ($normalizedCmd -eq $normalizedExe) {
+                        $showBothPaths = $false
+                    }
+                }
+                
+                # Display Command Line only if needed
+                if ($result.CommandLine -and ($More -or $showBothPaths)) {
                     Write-Host "Command Line     : " -NoNewline -ForegroundColor Yellow
                     Write-Host $result.CommandLine -ForegroundColor Red
                 }
                 
+                # Always display Executable Path if available
                 if ($result.ExecutablePath) {
                     Write-Host "Executable Path  : " -NoNewline -ForegroundColor Yellow
                     Write-Host $result.ExecutablePath -ForegroundColor Green
@@ -23488,6 +23683,11 @@ function Hunt-Services {
                 if ($result.SHA256) {
                     Write-Host "SHA256           : " -NoNewline -ForegroundColor Yellow
                     Write-Host $result.SHA256 -ForegroundColor Gray
+                }
+                
+                if ($result.LastModified) {
+                    Write-Host "Last Modified    : " -NoNewline -ForegroundColor Yellow
+                    Write-Host $result.LastModified -ForegroundColor DarkGray
                 }
                 
                 # Additional fields - only with -More switch
@@ -23503,11 +23703,6 @@ function Hunt-Services {
                     if ($result.Description) {
                         Write-Host "Description      : " -NoNewline -ForegroundColor Yellow
                         Write-Host $result.Description -ForegroundColor DarkGray
-                    }
-                    
-                    if ($result.LastModified) {
-                        Write-Host "Last Modified    : " -NoNewline -ForegroundColor Yellow
-                        Write-Host $result.LastModified -ForegroundColor DarkGray
                     }
                     
                     if ($result.Dependencies) {
