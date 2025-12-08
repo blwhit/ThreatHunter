@@ -4,28 +4,38 @@
 # ------------------------
 # [ Module Manifest ]
 # ======================
-# [] Hunt-Logs
-# [] Hunt-ForensicDump
-# [] Hunt-Files
-# [X] Hunt-Persistence
-# [X] Hunt-Browser
-# [X] Hunt-VirusTotal
-# [X] Hunt-Services
-# [X] Hunt-Tasks
-# [X] Hunt-Registry
+# []    Hunt-ForensicDump
+# [...] Hunt-Logs
+# [X]   Hunt-Files 
+# [X]   Hunt-Persistence
+# [X]   Hunt-Browser
+# [X]   Hunt-VirusTotal
+# [X]   Hunt-Services
+# [X]   Hunt-Tasks
+# [X]   Hunt-Registry
 # -----------------------------
 
 #   Function Reviews and Future Features:
 # ========================================
 # - Hunt-ForensicDump: could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
 # - Hunt-ForensicDump: add a base64 string of the Compressed Arrchive of all EVTX logs? That way you will always have all event logs..... is this possible?
-# - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... 
 # - Hunt-ForensicDump: Review CSV Output files for formatting/etc.
 # - Hunt-Logs: add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
+# - Hunt-Files: Add 'Caching' functionality for file searches
 
 
 #   Final/Full Review & To Do
 # --------------------------------------------
+
+# - Hunt-ForensicDump: Add something to enumerate local admins (which accounts have Administrator privileges?)
+# - Hunt-ForensicDump: Random error "Error rendering table: Cannot read properties of undefined (reading 'toLocaleString')" <--- Random unknown log table in 'Event Logs' tab [its happening with multiple tables, might just be blank tables erroring out]
+# - Hunt-ForensicDump: Add PID and TID to event logs..
+# - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... User profile list? Firewall or antivirus settings? Services?
+# - Hunt-ForensicDump: In the Persistence tab, move the "Flag" field to the front, and sort by it (non null values at the top)
+# - Hunt-ForensicDump: remove the 'Settings' tab "Max Rows Per Table" control. it doesnt do anything helpful-- atleast tell users you can only go down... the "Max Chars Per Cell" does however work...
+# - Hunt-ForensicDump: Might want to reorganize the tabs. Put the most used first... least used towards the right side...
+# - Hunt-ForensicDump: make sure all new sub function features are implemented corrrectly... validate that updated and new sub-functions work comprehensively 
+
 # - Make Wiki
 # - Review each funtion: Full description, Every parameter/feature/sub-function (with examples)
 # - Full review of usage and every parameter/feature audit
@@ -5745,7 +5755,7 @@ $(
         
         <div id="files-tab" class="tab-content">
             <h2 style="color: #3498db; margin-bottom: 15px;">File System Analysis</h2>
-            <p style="color: var(--text-muted); margin-bottom: 20px;">Recently accessed, modified, or created files matching the report's time range.</p>
+            <p style="color: var(--text-muted); margin-bottom: 20px;">Recently accessed, modified, or created files and folders.</p>
             <div id="files-content"></div>
         </div>
         
@@ -15978,9 +15988,6 @@ Default Mode: Hunt-Browser runs in All mode by default, returning all discovered
 
 Cache Behavior: Once browser history is cached (via LoadTool mode), all subsequent Hunt-Browser commands automatically use the cache for faster searches. The cache persists for the PowerShell session and can be cleared with -ClearCache. Use -LoadTool to refresh cached data or -NoCache to bypass the cache for a single query.
 
-.PARAMETER Cache
-Preserves extracted browser databases for manual analysis without processing strings.
-
 .PARAMETER Auto
 Uses predefined suspicious patterns to identify potentially malicious artifacts. Optional mode for filtered detection.
 
@@ -19780,7 +19787,7 @@ Include Windows system folders (Windows, Program Files) in search.
 Search for hidden files and folders.
 
 .PARAMETER Recycled
-Search in recycle bin folders.
+Search in recycle bin folders exclusively. When specified, only recycle bins are searched regardless of -Path parameter.
 
 .PARAMETER Streams
 Search for files with alternate data streams (ADS).
@@ -19796,9 +19803,6 @@ Filter results by type: FILE/F for files only, DIR/DIRECTORY/D for directories o
 
 .PARAMETER VerboseOutput
 Show detailed error messages during processing.
-
-.PARAMETER Aggressive
-Enable more thorough searching with relaxed date requirements.
 
 .PARAMETER OutputCSV
 Export results to CSV file. Can specify file path or directory (auto-generates filename).
@@ -19883,9 +19887,6 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
     
         [Parameter(Mandatory = $false)]
         [switch]$VerboseOutput,
-    
-        [Parameter(Mandatory = $false)]
-        [switch]$Aggressive,
     
         [Parameter(Mandatory = $false)]
         [string]$OutputCSV = "",
@@ -20375,12 +20376,17 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
         }
     }
 
-    # Normalize extensions and Search
+    # Normalize extensions and Search - use HashSet for faster lookups
+    $extensionSet = $null
     if ($Extensions.Count -gt 0) {
         $Extensions = @($Extensions | ForEach-Object { 
                 $ext = $_.ToLower().Trim()
                 if (-not $ext.StartsWith('.')) { ".$ext" } else { $ext }
             })
+        $extensionSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($ext in $Extensions) {
+            [void]$extensionSet.Add($ext)
+        }
     }
 
     if ($Search.Count -gt 0) {
@@ -20390,12 +20396,12 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
     $maxSizeBytes = [long]$MaxSizeMB * 1MB
     $systemFolders = @("$env:windir", "$env:ProgramFiles", "${env:ProgramFiles(x86)}")
 
-    # Initialize counters
+    # Initialize counters and pre-allocate results collection for performance
     $filesMatched = 0
     $foldersMatched = 0
     $streamMatches = 0
     $totalStreamsFound = 0
-    $results = @()
+    $results = [System.Collections.ArrayList]::new()
     $totalOutputChars = 0
 
     Write-Progress -Activity "Hunt-Files" -Status "Scanning filesystem..." -PercentComplete 50
@@ -20423,19 +20429,22 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
 
             foreach ($subPath in $searchSubPaths) {
                 try {
-                    # Optimized file enumeration
+                    # Optimized file enumeration - use Filter parameter when possible
                     try {
-                        # Apply date filter at enumeration level if dates specified
+                        # Get all items first (fastest approach - no pipeline filtering)
+                        $pathItems = @(Get-ChildItem -Path $subPath -Recurse -Force -ErrorAction SilentlyContinue)
+                        
+                        # Apply date filter in memory if specified (faster than pipeline Where-Object)
                         if ($null -ne $parsedStartDate -and $null -ne $parsedEndDate) {
-                            $pathItems = @(Get-ChildItem -Path $subPath -Recurse -Force -ErrorAction SilentlyContinue |
-                                Where-Object {
-                                    ($_.LastWriteTime -ge $parsedStartDate -and $_.LastWriteTime -le $parsedEndDate) -or
-                                    ($_.CreationTime -ge $parsedStartDate -and $_.CreationTime -le $parsedEndDate) -or
-                                    ($_.LastAccessTime -ge $parsedStartDate -and $_.LastAccessTime -le $parsedEndDate)
-                                })
-                        }
-                        else {
-                            $pathItems = @(Get-ChildItem -Path $subPath -Recurse -Force -ErrorAction SilentlyContinue)
+                            $filteredItems = [System.Collections.ArrayList]::new($pathItems.Count)
+                            foreach ($item in $pathItems) {
+                                if (($item.LastWriteTime -ge $parsedStartDate -and $item.LastWriteTime -le $parsedEndDate) -or
+                                    ($item.CreationTime -ge $parsedStartDate -and $item.CreationTime -le $parsedEndDate) -or
+                                    ($item.LastAccessTime -ge $parsedStartDate -and $item.LastAccessTime -le $parsedEndDate)) {
+                                    [void]$filteredItems.Add($item)
+                                }
+                            }
+                            $pathItems = $filteredItems.ToArray()
                         }
                     }
                     catch {
@@ -20451,10 +20460,21 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                         
                     # Filter out system folders if not included - optimized check
                     if (-not $IncludeSystemFolders -and -not $Recycled) {
-                        $pathItems = @($pathItems | Where-Object {
-                                $itemPath = $_.FullName
-                                -not ($systemFolders | Where-Object { $itemPath.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) })
-                            })
+                        $filteredItems = [System.Collections.ArrayList]::new($pathItems.Count)
+                        foreach ($item in $pathItems) {
+                            $itemPath = $item.FullName
+                            $isSystemFolder = $false
+                            foreach ($sysFolder in $systemFolders) {
+                                if ($itemPath.StartsWith($sysFolder, [System.StringComparison]::OrdinalIgnoreCase)) {
+                                    $isSystemFolder = $true
+                                    break
+                                }
+                            }
+                            if (-not $isSystemFolder) {
+                                [void]$filteredItems.Add($item)
+                            }
+                        }
+                        $pathItems = $filteredItems.ToArray()
                     }
 
                     foreach ($item in $pathItems) {
@@ -20509,18 +20529,23 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                             }
 
                             # Regular search criteria
-                            # Date range matching - optimized
+                            # Date range matching - optimized with null checks
                             if ($null -ne $parsedStartDate -and $null -ne $parsedEndDate) {
                                 $dateMatches = @()
-                                        
-                                if ($item.CreationTime -ge $parsedStartDate -and $item.CreationTime -le $parsedEndDate) {
-                                    $dateMatches += "Created"
+                                
+                                try {
+                                    if ($null -ne $item.CreationTime -and $item.CreationTime -ge $parsedStartDate -and $item.CreationTime -le $parsedEndDate) {
+                                        $dateMatches += "Created"
+                                    }
+                                    if ($null -ne $item.LastWriteTime -and $item.LastWriteTime -ge $parsedStartDate -and $item.LastWriteTime -le $parsedEndDate) {
+                                        $dateMatches += "Modified"
+                                    }
+                                    if ($null -ne $item.LastAccessTime -and $item.LastAccessTime -ge $parsedStartDate -and $item.LastAccessTime -le $parsedEndDate) {
+                                        $dateMatches += "Accessed"
+                                    }
                                 }
-                                if ($item.LastWriteTime -ge $parsedStartDate -and $item.LastWriteTime -le $parsedEndDate) {
-                                    $dateMatches += "Modified"
-                                }
-                                if ($item.LastAccessTime -ge $parsedStartDate -and $item.LastAccessTime -le $parsedEndDate) {
-                                    $dateMatches += "Accessed"
+                                catch {
+                                    # Skip items with invalid datetime properties
                                 }
                                         
                                 if ($dateMatches.Count -gt 0) {
@@ -20553,16 +20578,16 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                                 }
                             }
 
-                            # Extension matching - optimized
-                            if ($Extensions.Count -gt 0 -and -not $isDirectory) {
+                            # Extension matching - optimized with HashSet
+                            if ($null -ne $extensionSet -and -not $isDirectory) {
                                 $itemExt = $item.Extension.ToLower()
-                                if ($Extensions -contains $itemExt) {
+                                if ($extensionSet.Contains($itemExt)) {
                                     $itemMatchReasons += "Ext:$itemExt"
                                 }
                             }
 
                             # Content matching - check file size first for performance
-                            if ($Content.Count -gt 0 -and -not $isDirectory -and $item.Length -le $maxSizeBytes -and $item.Length -gt 0) {
+                            if ($Content.Count -gt 0 -and -not $isDirectory -and $null -ne $item.Length -and $item.Length -le $maxSizeBytes -and $item.Length -gt 0) {
                                 $allStreamMatches = @()
     
                                 try {
@@ -20614,7 +20639,6 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                             # Hash matching - optimized
                             if ($normalizedHashes.Count -gt 0 -and -not $isDirectory) {
                                 $hashMatches = @()
-                                $sha256Computed = $false
                                         
                                 try {
                                     # Check main stream
@@ -20628,7 +20652,6 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                                             # If we computed SHA256, save it
                                             if ($algo -eq 'SHA256') {
                                                 $sha256 = $computedHash
-                                                $sha256Computed = $true
                                             }
                                         }
                                     }
@@ -20662,8 +20685,8 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                                 }
                                 else {
                                     $filesMatched++
-                                    # Compute SHA256 for files if not done yet (only once)
-                                    if ([string]::IsNullOrEmpty($sha256)) {
+                                    # Compute SHA256 for files if not done yet (only once) - skip files over 100MB for performance
+                                    if ([string]::IsNullOrEmpty($sha256) -and $null -ne $item.Length -and $item.Length -le 100MB) {
                                         try {
                                             $sha256 = Get-FileHashCustom -FilePath $item.FullName -Algorithm 'SHA256'
                                         }
@@ -20702,7 +20725,7 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                                     FullPath             = $item.FullName
                                     Name                 = $item.Name
                                     IsDirectory          = $isDirectory
-                                    SizeMB               = if ($isDirectory) { 0 } else { [math]::Round($item.Length / 1MB, 4) }
+                                    SizeMB               = if ($isDirectory) { 0 } elseif ($null -eq $item.Length) { 0 } else { [math]::Round($item.Length / 1MB, 4) }
                                     CreationTime         = $item.CreationTime
                                     LastWriteTime        = $item.LastWriteTime
                                     LastAccessTime       = $item.LastAccessTime
@@ -20719,7 +20742,7 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                                     LnkTargetSHA256      = $lnkTargetHash
                                 }
 
-                                $results += $result
+                                [void]$results.Add($result)
                             }
                         }
                         catch {
@@ -20746,8 +20769,9 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
 
     Write-Progress -Activity "Hunt-Files" -Status "Displaying results..." -PercentComplete 80
 
-    # Sort and display results
-    $sortedResults = @($results | Sort-Object LastWriteTime -Descending)
+    # Convert ArrayList to array and sort results
+    $resultsArray = if ($results.Count -gt 0) { $results.ToArray() } else { @() }
+    $sortedResults = @($resultsArray | Sort-Object LastWriteTime -Descending)
 
     # Apply Type filter before displaying results
     if (![string]::IsNullOrWhiteSpace($filterType)) {
@@ -20791,11 +20815,26 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
             }
         
             Write-Host "Created      : " -ForegroundColor Yellow -NoNewline
-            Write-Host "$(Format-DateTimeWithTimeZone -DateTime $result.CreationTime -TargetTimeZone $targetTimeZone)" -ForegroundColor White
+            try {
+                Write-Host "$(Format-DateTimeWithTimeZone -DateTime $result.CreationTime -TargetTimeZone $targetTimeZone)" -ForegroundColor White
+            }
+            catch {
+                Write-Host "[Invalid DateTime]" -ForegroundColor DarkRed
+            }
             Write-Host "Modified     : " -ForegroundColor Yellow -NoNewline
-            Write-Host "$(Format-DateTimeWithTimeZone -DateTime $result.LastWriteTime -TargetTimeZone $targetTimeZone)" -ForegroundColor White
+            try {
+                Write-Host "$(Format-DateTimeWithTimeZone -DateTime $result.LastWriteTime -TargetTimeZone $targetTimeZone)" -ForegroundColor White
+            }
+            catch {
+                Write-Host "[Invalid DateTime]" -ForegroundColor DarkRed
+            }
             Write-Host "Accessed     : " -ForegroundColor Yellow -NoNewline
-            Write-Host "$(Format-DateTimeWithTimeZone -DateTime $result.LastAccessTime -TargetTimeZone $targetTimeZone)" -ForegroundColor White
+            try {
+                Write-Host "$(Format-DateTimeWithTimeZone -DateTime $result.LastAccessTime -TargetTimeZone $targetTimeZone)" -ForegroundColor White
+            }
+            catch {
+                Write-Host "[Invalid DateTime]" -ForegroundColor DarkRed
+            }
         
             if (-not $result.IsDirectory -and ![string]::IsNullOrWhiteSpace($result.SHA256)) {
                 Write-Host "SHA256       : " -ForegroundColor Yellow -NoNewline
@@ -20844,7 +20883,7 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                 }
             }
             
-            if (![string]::IsNullOrWhiteSpace($result.Match)) {
+            if (![string]::IsNullOrWhiteSpace($result.MatchReason)) {
                 Write-Host "Match        : " -ForegroundColor Yellow -NoNewline
                 Write-Host "$($result.MatchReason)" -ForegroundColor Red
             }
@@ -20920,17 +20959,37 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
                 throw "Unable to create CSV output directory: $($_.Exception.Message)"
             }
         
-            # Prepare CSV data
+            # Prepare CSV data with defensive datetime handling
             $csvData = @()
             foreach ($result in $sortedResults) {
+                # Safely format datetime fields
+                $createdTime = try { 
+                    Format-DateTimeWithTimeZone -DateTime $result.CreationTime -TargetTimeZone $targetTimeZone 
+                }
+                catch { 
+                    "[Invalid DateTime]" 
+                }
+                $modifiedTime = try { 
+                    Format-DateTimeWithTimeZone -DateTime $result.LastWriteTime -TargetTimeZone $targetTimeZone 
+                }
+                catch { 
+                    "[Invalid DateTime]" 
+                }
+                $accessedTime = try { 
+                    Format-DateTimeWithTimeZone -DateTime $result.LastAccessTime -TargetTimeZone $targetTimeZone 
+                }
+                catch { 
+                    "[Invalid DateTime]" 
+                }
+                
                 $csvData += [PSCustomObject]@{
                     Type                 = if ($result.IsDirectory) { "Directory" } else { "File" }
                     FullPath             = Sanitize-CSVValue $result.FullPath
                     Name                 = Sanitize-CSVValue $result.Name
                     SizeMB               = $result.SizeMB
-                    CreationTime         = Format-DateTimeWithTimeZone -DateTime $result.CreationTime -TargetTimeZone $targetTimeZone
-                    LastWriteTime        = Format-DateTimeWithTimeZone -DateTime $result.LastWriteTime -TargetTimeZone $targetTimeZone
-                    LastAccessTime       = Format-DateTimeWithTimeZone -DateTime $result.LastAccessTime -TargetTimeZone $targetTimeZone
+                    CreationTime         = $createdTime
+                    LastWriteTime        = $modifiedTime
+                    LastAccessTime       = $accessedTime
                     SHA256               = Sanitize-CSVValue $result.SHA256
                     Signature            = Sanitize-CSVValue $result.Signature
                     MatchReason          = Sanitize-CSVValue $result.MatchReason
