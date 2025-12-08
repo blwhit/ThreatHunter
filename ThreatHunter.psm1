@@ -4,15 +4,15 @@
 # ------------------------
 # [ Module Manifest ]
 # ======================
-# [X] Hunt-Persistence
 # [] Hunt-Logs
 # [] Hunt-ForensicDump
-# [X] Hunt-Browser
 # [] Hunt-Files
+# [X] Hunt-Persistence
+# [X] Hunt-Browser
 # [X] Hunt-VirusTotal
-# [] Hunt-Services
-# [] Hunt-Tasks
-# [] Hunt-Registry
+# [X] Hunt-Services
+# [X] Hunt-Tasks
+# [X] Hunt-Registry
 # -----------------------------
 
 #   Function Reviews and Future Features:
@@ -15974,19 +15974,21 @@ Hunts for browser artifacts, history, and network indicators across user profile
 .DESCRIPTION
 Hunt-Browser is a digital forensics function that extracts and analyzes browser history, cache data, and DNS logs to identify suspicious network activity, malicious URLs, and file system artifacts. It supports multiple browsers including Chrome, Firefox, Edge, and their variants.
 
+Default Mode: Hunt-Browser runs in All mode by default, returning all discovered artifacts. Use -Auto or -Aggressive for pattern-based filtering, or -Search/-Exclude for custom filtering.
+
 Cache Behavior: Once browser history is cached (via LoadTool mode), all subsequent Hunt-Browser commands automatically use the cache for faster searches. The cache persists for the PowerShell session and can be cleared with -ClearCache. Use -LoadTool to refresh cached data or -NoCache to bypass the cache for a single query.
 
 .PARAMETER Cache
 Preserves extracted browser databases for manual analysis without processing strings.
 
 .PARAMETER Auto
-Uses predefined suspicious patterns to identify potentially malicious artifacts (default mode).
+Uses predefined suspicious patterns to identify potentially malicious artifacts. Optional mode for filtered detection.
 
 .PARAMETER Aggressive
 Expands detection to Search broader patterns that may generate more false positives.
 
 .PARAMETER All
-Returns all discovered browser artifacts without filtering.
+Returns all discovered browser artifacts without filtering (default mode).
 
 .PARAMETER Extensions
 Enumerates all installed browser extensions across all browsers and user profiles.
@@ -16051,7 +16053,7 @@ Only applies to LoadTool/cached results. Native mode uses its own sorting logic.
 
 .EXAMPLE
 Hunt-Browser
-Runs in Auto mode, scanning all user profiles for suspicious browser artifacts.
+Runs in All mode (default), scanning all user profiles and returning all browser artifacts.
 
 .EXAMPLE
 Hunt-Browser -All -OutputCSV "C:\Reports\browser_analysis.csv" -Quiet
@@ -19321,14 +19323,14 @@ Returns extension objects with webRequest permissions for further analysis.
         }
     }
     elseif ($modeCount -eq 0 -and -not $LoadTool) {
-        $effectiveMode = "Auto"
+        $effectiveMode = "All"
     }
     else {
         $effectiveMode = switch ($true) {
             $Auto { "Auto" }
             $Aggressive { "Aggressive" }
             $All { "All" }
-            default { "Auto" }
+            default { "All" }
         }
     }
     
@@ -22421,15 +22423,17 @@ function Hunt-Tasks {
 function Hunt-Registry {
     <#
 .SYNOPSIS
-Hunt-Registry searches Windows registry for specified strings and autorun persistence locations.
+Hunt-Registry searches Windows registry for specified strings and autorun persistence locations. Default Mode: RunKeys.
 
 .DESCRIPTION
 Hunt-Registry is a DFIR function that searches the Windows registry for specified strings across keys, values, and data. 
 It can also enumerate all autorun registry locations commonly used for persistence. The function supports searching 
 specific registry hives, loading unloaded user profiles, and exporting results to CSV format.
 
+Default Behavior: When called without parameters, Hunt-Registry runs in RunKeys mode to enumerate autorun locations.
+
 .PARAMETER Search
-Array of strings to search for in registry keys, value names, and value data. Not required when using -RunKeys.
+Array of strings to search for in registry keys, value names, and value data. Not required when using -RunKeys (default mode).
 
 .PARAMETER Type
 Specifies what to search: Key, Value, StringValue, BinaryValue, DWordValue, QWordValue, MultiStringValue, ExpandStringValue, or All.
@@ -22437,8 +22441,15 @@ Specifies what to search: Key, Value, StringValue, BinaryValue, DWordValue, QWor
 .PARAMETER Hive
 Specifies which registry hive to search: HKLM, HKCU, HKCR, HKU, HKCC, or All.
 
+.PARAMETER Path
+Array of registry paths to limit search scope. Supports wildcards and multiple formats:
+- PowerShell format: "HKLM:\Software\Microsoft\Windows"
+- Registry format: "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft"
+- Relative format: "Software\Microsoft\Windows" (combined with -Hive parameter)
+Significantly improves performance by limiting search scope.
+
 .PARAMETER RunKeys
-Switch to retrieve all autorun registry locations instead of searching for specific strings.
+Switch to retrieve all autorun registry locations instead of searching for specific strings. This is the default mode when no Search parameter is provided.
 
 .PARAMETER LoadHives
 Switch to load unloaded user registry hives. Requires administrator privileges.
@@ -22451,6 +22462,10 @@ Path to export results to CSV. Can be a file path or directory path (will auto-g
 
 .PARAMETER Quiet
 Switch to suppress console output (errors and warnings still shown).
+
+.EXAMPLE
+Hunt-Registry
+Retrieves all autorun registry locations (default RunKeys mode).
 
 .EXAMPLE
 Hunt-Registry -Search @("malware", "backdoor") -Type All
@@ -22467,6 +22482,14 @@ Searches HKLM for string values containing "powershell.exe", returns objects sil
 .EXAMPLE
 Hunt-Registry -Search @("evil.exe") -LoadHives -PassThru
 Searches all hives including unloaded user profiles for "evil.exe".
+
+.EXAMPLE
+Hunt-Registry -Search "malware" -Path "HKLM:\Software\Microsoft\Windows"
+Searches only the specified registry path for "malware", improving performance.
+
+.EXAMPLE
+Hunt-Registry -Search "*.exe" -Path "Software\Microsoft\Windows\*\Run*" -Hive HKLM
+Searches Run keys under Windows using wildcard paths for scoped analysis.
 #>
     [CmdletBinding()]
     param(
@@ -22480,6 +22503,9 @@ Searches all hives including unloaded user profiles for "evil.exe".
         [Parameter(Mandatory = $false)]
         [ValidateSet('HKLM', 'HKCU', 'HKCR', 'HKU', 'HKCC', 'All')]
         [string]$Hive = 'All',
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$Path = @(),
 
         [Parameter(Mandatory = $false)]
         [switch]$RunKeys,
@@ -22504,7 +22530,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
     $hostname = $env:COMPUTERNAME
     $results = @()
 
-    # Known Run keys from Hunt-Persistence
+    # Known Run keys from Hunt-Persistence - Comprehensive autorun locations
     $runKeyPaths = @(
         'SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
         'SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
@@ -22517,7 +22543,14 @@ Searches all hives including unloaded user profiles for "evil.exe".
         'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce',
         'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\Install\Software\Microsoft\Windows\CurrentVersion\Run',
         'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\Install\Software\Microsoft\Windows\CurrentVersion\RunOnce',
-        'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\System'
+        'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\System',
+        'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Userinit',
+        'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell',
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\ShellServiceObjectDelayLoad',
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SharedTaskScheduler',
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellExecuteHooks',
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers',
+        'SOFTWARE\Microsoft\Active Setup\Installed Components'
     )
 
 
@@ -22561,12 +22594,6 @@ Searches all hives including unloaded user profiles for "evil.exe".
                         $result.ValueData = "[Data conversion error]"
                     }
                 }
-                if ($result.PSObject.Properties.Name -contains 'SearchTerm') {
-                    $result.SearchTerm = Format-ExcelSafeString $result.SearchTerm
-                }
-                if ($result.PSObject.Properties.Name -contains 'MatchLocation') {
-                    $result.MatchLocation = Format-ExcelSafeString $result.MatchLocation
-                }
                 if ($result.PSObject.Properties.Name -contains 'Hostname') {
                     $result.Hostname = Format-ExcelSafeString $result.Hostname
                 }
@@ -22575,6 +22602,9 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 }
                 if ($result.PSObject.Properties.Name -contains 'ValueType') {
                     $result.ValueType = Format-ExcelSafeString $result.ValueType
+                }
+                if ($result.PSObject.Properties.Name -contains 'LastWriteTime') {
+                    $result.LastWriteTime = Format-ExcelSafeString $result.LastWriteTime
                 }
             }
             return $Results
@@ -22603,26 +22633,40 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 # It's a file path
                 $directory = Split-Path $OutputPath -Parent
                 if (-not [string]::IsNullOrEmpty($directory) -and !(Test-Path $directory -ErrorAction SilentlyContinue)) {
-                    New-Item -ItemType Directory -Path $directory -Force -ErrorAction Stop | Out-Null
+                    try {
+                        New-Item -ItemType Directory -Path $directory -Force -ErrorAction Stop | Out-Null
+                        Write-Verbose "Created directory: $directory"
+                    }
+                    catch {
+                        Write-Warning "Could not create directory: $directory"
+                        return $null
+                    }
                 }
                 $fullPath = $OutputPath
             }
-    
+
             # Ensure .csv extension
             if (![System.IO.Path]::HasExtension($fullPath) -or [System.IO.Path]::GetExtension($fullPath) -ne '.csv') {
                 $fullPath += '.csv'
             }
-    
+
+            # Ensure parent directory exists before export
+            $parentDir = Split-Path $fullPath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($parentDir) -and -not (Test-Path $parentDir -PathType Container)) {
+                New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction Stop | Out-Null
+                Write-Verbose "Created parent directory: $parentDir"
+            }
+
             # Sanitize results for Excel
             $safeResults = ConvertTo-SafeCSV $Results
-    
+
             # Export to CSV with error handling
             $safeResults | Export-Csv -Path $fullPath -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
-    
+
             if (-not $Quiet) {
                 Write-Host "[CSV] Results exported to: $fullPath" -ForegroundColor Green
             }
-    
+
             return $fullPath
         }
         catch {
@@ -22675,8 +22719,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
             [string]$ValueName = $null,
             [string]$ValueType = $null,
             [string]$ValueData = $null,
-            [string]$SearchTerm,
-            [string]$MatchLocation
+            [string]$LastWriteTime = $null
         )
         
         return [PSCustomObject]@{
@@ -22686,9 +22729,167 @@ Searches all hives including unloaded user profiles for "evil.exe".
             ValueName     = $ValueName
             ValueType     = $ValueType
             ValueData     = $ValueData
-            SearchTerm    = $SearchTerm
-            MatchLocation = $MatchLocation
+            LastWriteTime = $LastWriteTime
         }
+    }
+
+    function Get-HiveNameFromPath {
+        param([string]$HivePath)
+        
+        # Handle full Registry:: paths
+        if ($HivePath -like "*Registry::HKEY_LOCAL_MACHINE*") {
+            return "HKEY_LOCAL_MACHINE"
+        }
+        elseif ($HivePath -like "*Registry::HKEY_CURRENT_USER*") {
+            return "HKEY_CURRENT_USER"
+        }
+        elseif ($HivePath -like "*Registry::HKEY_CLASSES_ROOT*") {
+            return "HKEY_CLASSES_ROOT"
+        }
+        elseif ($HivePath -like "*Registry::HKEY_USERS*") {
+            return "HKEY_USERS"
+        }
+        elseif ($HivePath -like "*Registry::HKEY_CURRENT_CONFIG*") {
+            return "HKEY_CURRENT_CONFIG"
+        }
+        # Handle PowerShell drive paths (HKLM:\, HKCU:\, etc.)
+        elseif ($HivePath -match '^HKLM:') {
+            return "HKEY_LOCAL_MACHINE"
+        }
+        elseif ($HivePath -match '^HKCU:') {
+            return "HKEY_CURRENT_USER"
+        }
+        elseif ($HivePath -match '^HKCR:') {
+            return "HKEY_CLASSES_ROOT"
+        }
+        elseif ($HivePath -match '^HKU:') {
+            return "HKEY_USERS"
+        }
+        elseif ($HivePath -match '^HKCC:') {
+            return "HKEY_CURRENT_CONFIG"
+        }
+        else {
+            return Split-Path $HivePath -Leaf
+        }
+    }
+
+    function ConvertTo-RegistryPath {
+        param(
+            [string]$InputPath,
+            [string]$BaseHive
+        )
+        
+        if ([string]::IsNullOrWhiteSpace($InputPath)) {
+            return $null
+        }
+        
+        try {
+            # Already in PowerShell provider format (HKLM:\, HKCU:\, etc.)
+            if ($InputPath -match '^HK(LM|CU|CR|U|CC):') {
+                return $InputPath
+            }
+            
+            # Registry:: format - convert to PowerShell format
+            if ($InputPath -match '^Registry::HKEY_LOCAL_MACHINE') {
+                return $InputPath -replace '^Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
+            }
+            if ($InputPath -match '^Registry::HKEY_CURRENT_USER') {
+                return $InputPath -replace '^Registry::HKEY_CURRENT_USER', 'HKCU:'
+            }
+            if ($InputPath -match '^Registry::HKEY_CLASSES_ROOT') {
+                return $InputPath -replace '^Registry::HKEY_CLASSES_ROOT', 'HKCR:'
+            }
+            if ($InputPath -match '^Registry::HKEY_USERS') {
+                return $InputPath -replace '^Registry::HKEY_USERS', 'HKU:'
+            }
+            if ($InputPath -match '^Registry::HKEY_CURRENT_CONFIG') {
+                return $InputPath -replace '^Registry::HKEY_CURRENT_CONFIG', 'HKCC:'
+            }
+            
+            # Relative path - combine with BaseHive
+            if (![string]::IsNullOrWhiteSpace($BaseHive)) {
+                # Remove leading backslash if present
+                $cleanPath = $InputPath.TrimStart('\')
+                return "$BaseHive\$cleanPath"
+            }
+            
+            Write-Verbose "Could not determine registry path format for: $InputPath"
+            return $null
+        }
+        catch {
+            Write-Verbose "Error converting registry path: $($_.Exception.Message)"
+            return $null
+        }
+    }
+
+    function Get-RegistryPathsToSearch {
+        param(
+            [string[]]$UserPaths,
+            [string]$HiveFilter,
+            [array]$AvailableHives
+        )
+        
+        $pathsToSearch = [System.Collections.Generic.List[string]]::new()
+        
+        # If user specified paths, normalize and use them
+        if ($UserPaths -and $UserPaths.Count -gt 0) {
+            foreach ($userPath in $UserPaths) {
+                if ([string]::IsNullOrWhiteSpace($userPath)) { continue }
+                
+                # Try to convert to proper format
+                $convertedPath = ConvertTo-RegistryPath -InputPath $userPath -BaseHive ""
+                
+                # If conversion failed and we have a hive filter, try with hive prefix
+                if (-not $convertedPath -and $HiveFilter -ne 'All') {
+                    $hivePrefix = switch ($HiveFilter) {
+                        'HKLM' { 'HKLM:' }
+                        'HKCU' { 'HKCU:' }
+                        'HKCR' { 'HKCR:' }
+                        'HKU' { 'HKU:' }
+                        'HKCC' { 'HKCC:' }
+                        default { $null }
+                    }
+                    
+                    if ($hivePrefix) {
+                        $convertedPath = ConvertTo-RegistryPath -InputPath $userPath -BaseHive $hivePrefix
+                    }
+                }
+                
+                if ($convertedPath) {
+                    # Handle wildcards - expand paths if wildcard present
+                    if ($convertedPath -match '[\*\?]') {
+                        try {
+                            $expandedPaths = @(Get-Item -Path $convertedPath -ErrorAction SilentlyContinue)
+                            foreach ($expandedPath in $expandedPaths) {
+                                if ($expandedPath) {
+                                    $pathsToSearch.Add($expandedPath.PSPath)
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Could not expand wildcard path: $convertedPath"
+                        }
+                    }
+                    else {
+                        # Add path directly if no wildcards
+                        if (Test-Path $convertedPath -ErrorAction SilentlyContinue) {
+                            $pathsToSearch.Add($convertedPath)
+                        }
+                        else {
+                            Write-Verbose "Path does not exist: $convertedPath"
+                        }
+                    }
+                }
+            }
+        }
+        else {
+            # No user paths - use available hives (default behavior)
+            foreach ($hive in $AvailableHives) {
+                $pathsToSearch.Add($hive)
+            }
+        }
+        
+        return $pathsToSearch.ToArray()
     }
 
     function Search-RegistryRecursive {
@@ -22705,28 +22906,39 @@ Searches all hives including unloaded user profiles for "evil.exe".
         $processedKeys = 0
 
         # Extract hive name from PSPath format
-        if ($HivePath -like "*Registry::HKEY_LOCAL_MACHINE*") {
-            $hiveName = "HKEY_LOCAL_MACHINE"
-        }
-        elseif ($HivePath -like "*Registry::HKEY_CURRENT_USER*") {
-            $hiveName = "HKEY_CURRENT_USER"
-        }
-        elseif ($HivePath -like "*Registry::HKEY_CLASSES_ROOT*") {
-            $hiveName = "HKEY_CLASSES_ROOT"
-        }
-        elseif ($HivePath -like "*Registry::HKEY_USERS*") {
-            $hiveName = "HKEY_USERS"
-        }
-        elseif ($HivePath -like "*Registry::HKEY_CURRENT_CONFIG*") {
-            $hiveName = "HKEY_CURRENT_CONFIG"
-        }
-        else {
-            $hiveName = Split-Path $HivePath -Leaf
-        }
+        $hiveName = Get-HiveNameFromPath -HivePath $HivePath
 
         try {
-            $keys = Get-ChildItem -Path $HivePath -Recurse -ErrorAction SilentlyContinue
+            # Get keys to search - include the target key itself plus subkeys
+            $keysToSearch = [System.Collections.Generic.List[object]]::new()
+            
+            try {
+                # First, add the target key itself (this is critical for searching values IN the specified key)
+                $targetKey = Get-Item -Path $HivePath -ErrorAction SilentlyContinue
+                if ($targetKey) {
+                    $keysToSearch.Add($targetKey)
+                }
+                
+                # Then add all subkeys recursively
+                $subKeys = Get-ChildItem -Path $HivePath -Recurse -ErrorAction SilentlyContinue
+                if ($subKeys) {
+                    foreach ($subKey in $subKeys) {
+                        $keysToSearch.Add($subKey)
+                    }
+                }
+            }
+            catch {
+                Write-Verbose "Error enumerating keys for path: $HivePath"
+            }
+            
+            $keys = $keysToSearch.ToArray()
             $totalKeys = $keys.Count
+            
+            # Early exit if no keys found
+            if ($totalKeys -eq 0) {
+                Write-Verbose "No keys found in path: $HivePath"
+                return $hiveResults
+            }
     
             if (-not $Quiet -and $totalKeys -gt 0) {
                 Write-Progress -Activity "Searching Registry" -Status "Processing $hiveName" -PercentComplete 0
@@ -22743,11 +22955,67 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 try {
                     $keyPath = $key.Name
             
+                    # Get key last write time using .NET registry API
+                    $keyLastWriteTime = $null
+                    try {
+                        # Extract the registry path components
+                        $regPath = $key.Name
+                        
+                        # Determine hive and subkey path
+                        $hiveMatch = $null
+                        $subKeyPath = $null
+                        
+                        if ($regPath -match '^HKEY_LOCAL_MACHINE\\(.*)') {
+                            $hiveMatch = [Microsoft.Win32.Registry]::LocalMachine
+                            $subKeyPath = $matches[1]
+                        }
+                        elseif ($regPath -match '^HKEY_CURRENT_USER\\(.*)') {
+                            $hiveMatch = [Microsoft.Win32.Registry]::CurrentUser
+                            $subKeyPath = $matches[1]
+                        }
+                        elseif ($regPath -match '^HKEY_CLASSES_ROOT\\(.*)') {
+                            $hiveMatch = [Microsoft.Win32.Registry]::ClassesRoot
+                            $subKeyPath = $matches[1]
+                        }
+                        elseif ($regPath -match '^HKEY_USERS\\(.*)') {
+                            $hiveMatch = [Microsoft.Win32.Registry]::Users
+                            $subKeyPath = $matches[1]
+                        }
+                        elseif ($regPath -match '^HKEY_CURRENT_CONFIG\\(.*)') {
+                            $hiveMatch = [Microsoft.Win32.Registry]::CurrentConfig
+                            $subKeyPath = $matches[1]
+                        }
+                        
+                        # Open the key and get LastWriteTime
+                        if ($hiveMatch -and $subKeyPath) {
+                            $regKey = $hiveMatch.OpenSubKey($subKeyPath, $false)
+                            if ($regKey) {
+                                try {
+                                    # Use reflection to access internal LastWriteTime
+                                    $regKeyType = [Microsoft.Win32.RegistryKey]
+                                    $method = $regKeyType.GetMethod('GetLastWriteTime', [System.Reflection.BindingFlags]'Instance,NonPublic')
+                                    if ($method) {
+                                        $lastWrite = $method.Invoke($regKey, $null)
+                                        if ($lastWrite -and $lastWrite -ne [DateTime]::MinValue) {
+                                            $keyLastWriteTime = $lastWrite.ToString("yyyy-MM-dd HH:mm:ss")
+                                        }
+                                    }
+                                }
+                                finally {
+                                    $regKey.Close()
+                                }
+                            }
+                        }
+                    }
+                    catch {
+                        Write-Verbose "Could not retrieve LastWriteTime for key: $($_.Exception.Message)"
+                    }
+                    
                     # Search in key names if applicable
                     if ($SearchType -eq 'All' -or $SearchType -eq 'Key') {
                         foreach ($searchTerm in $SearchTerms) {
                             if ($keyPath -like "*$searchTerm*") {
-                                $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -SearchTerm $searchTerm -MatchLocation "Key Name"
+                                $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -LastWriteTime $keyLastWriteTime
                             }
                         }
                     }
@@ -22766,23 +23034,17 @@ Searches all hives including unloaded user profiles for "evil.exe".
                                     $valueData = $properties.($prop.Name)
                                     $valueType = "Unknown"
                             
-                                    # Try to determine value type
+                                    # Determine value type from already-retrieved data (performance optimization)
                                     try {
-                                        $regValue = Get-ItemProperty -Path $key.PSPath -Name $valueName -ErrorAction SilentlyContinue
-                                        if ($regValue -and $null -ne $regValue.($valueName)) {
-                                            try {
-                                                $typeName = $regValue.($valueName).GetType().Name
-                                                $valueType = switch ($typeName) {
-                                                    'String' { 'String' }
-                                                    'String[]' { 'MultiString' }
-                                                    'Int32' { 'DWord' }
-                                                    'Int64' { 'QWord' }
-                                                    'Byte[]' { 'Binary' }
-                                                    default { $typeName }
-                                                }
-                                            }
-                                            catch {
-                                                $valueType = "Unknown"
+                                        if ($null -ne $valueData) {
+                                            $typeName = $valueData.GetType().Name
+                                            $valueType = switch ($typeName) {
+                                                'String' { 'String' }
+                                                'String[]' { 'MultiString' }
+                                                'Int32' { 'DWord' }
+                                                'Int64' { 'QWord' }
+                                                'Byte[]' { 'Binary' }
+                                                default { $typeName }
                                             }
                                         }
                                     }
@@ -22804,15 +23066,20 @@ Searches all hives including unloaded user profiles for "evil.exe".
                                     }
                             
                                     if ($typeMatch) {
+                                        # Track if this value already matched to avoid duplicates
+                                        $alreadyMatched = $false
+                                        
                                         # Search in value names
                                         foreach ($searchTerm in $SearchTerms) {
                                             if ($valueName -like "*$searchTerm*") {
-                                                $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -ValueName $valueName -ValueType $valueType -ValueData $valueData -SearchTerm $searchTerm -MatchLocation "Value Name"
+                                                $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -ValueName $valueName -ValueType $valueType -ValueData $valueData -LastWriteTime $keyLastWriteTime
+                                                $alreadyMatched = $true
+                                                break
                                             }
                                         }
                                 
-                                        # Search in value data
-                                        if ($null -ne $valueData) {
+                                        # Search in value data (only if not already matched)
+                                        if (-not $alreadyMatched -and $null -ne $valueData) {
                                             try {
                                                 $dataString = $null
                                                 
@@ -22837,7 +23104,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
                                                 if (![string]::IsNullOrWhiteSpace($dataString)) {
                                                     foreach ($searchTerm in $SearchTerms) {
                                                         if ($dataString -like "*$searchTerm*") {
-                                                            $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -ValueName $valueName -ValueType $valueType -ValueData $valueData -SearchTerm $searchTerm -MatchLocation "Value Data"
+                                                            $hiveResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $keyPath -ValueName $valueName -ValueType $valueType -ValueData $valueData -LastWriteTime $keyLastWriteTime
                                                         }
                                                     }
                                                 }
@@ -22887,24 +23154,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 }
             
                 # Extract hive name from PSPath format
-                if ($registryHive -like "*Registry::HKEY_LOCAL_MACHINE*") {
-                    $hiveName = "HKEY_LOCAL_MACHINE"
-                }
-                elseif ($registryHive -like "*Registry::HKEY_CURRENT_USER*") {
-                    $hiveName = "HKEY_CURRENT_USER"
-                }
-                elseif ($registryHive -like "*Registry::HKEY_CLASSES_ROOT*") {
-                    $hiveName = "HKEY_CLASSES_ROOT"
-                }
-                elseif ($registryHive -like "*Registry::HKEY_USERS*") {
-                    $hiveName = "HKEY_USERS"
-                }
-                elseif ($registryHive -like "*Registry::HKEY_CURRENT_CONFIG*") {
-                    $hiveName = "HKEY_CURRENT_CONFIG"
-                }
-                else {
-                    $hiveName = Split-Path $registryHive -Leaf
-                }
+                $hiveName = Get-HiveNameFromPath -HivePath $registryHive
     
                 foreach ($runPath in $runKeyPaths) {
                     try {
@@ -22917,7 +23167,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
                             foreach ($prop in (Get-Member -MemberType NoteProperty -InputObject $runProps)) {
                                 if ($psProperties.Contains($prop.Name)) { continue }
                     
-                                $runResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $runPath -ValueName $prop.Name -ValueType "String" -ValueData $runProps.($prop.Name) -SearchTerm "RunKey" -MatchLocation "Autorun Location"
+                                $runResults += New-RegistryResult -Hostname $hostname -HiveName $hiveName -KeyPath $runPath -ValueName $prop.Name -ValueType "String" -ValueData $runProps.($prop.Name) -LastWriteTime $null
                             }
                         }
                     }
@@ -23010,20 +23260,11 @@ Searches all hives including unloaded user profiles for "evil.exe".
             }
         }
         
-        if ($RegistryResult.SearchTerm) {
-            Write-Host "Search Term      : " -NoNewline -ForegroundColor Yellow
-            Write-Host $RegistryResult.SearchTerm -ForegroundColor DarkGray
-        }
-        
-        if ($RegistryResult.MatchLocation) {
-            Write-Host "Match Location   : " -NoNewline -ForegroundColor Yellow
-            Write-Host $RegistryResult.MatchLocation -ForegroundColor DarkGray
+        if ($RegistryResult.LastWriteTime) {
+            Write-Host "Last Write Time  : " -NoNewline -ForegroundColor Yellow
+            Write-Host $RegistryResult.LastWriteTime -ForegroundColor DarkGray
         }
 
-        if ($RegistryResult.Hostname) {
-            Write-Host "Hostname         : " -NoNewline -ForegroundColor Yellow
-            Write-Host $RegistryResult.Hostname -ForegroundColor DarkGray
-        }
     }
 
     # Get registry hives using shared helper
@@ -23053,8 +23294,11 @@ Searches all hives including unloaded user profiles for "evil.exe".
     try {
         Write-Verbose "Starting Hunt-Registry execution..."
         
-        # Handle RunKeys mode
-        if ($RunKeys) {
+        # Determine mode: Default to RunKeys if no Search specified
+        $effectiveRunKeysMode = $RunKeys -or ($Search.Count -eq 0)
+        
+        # Handle RunKeys mode (default mode when no Search provided)
+        if ($effectiveRunKeysMode) {
             if (-not $Quiet) {
                 Write-Host "[INFO] Retrieving all autorun registry locations..." -ForegroundColor Yellow
             }
@@ -23062,52 +23306,52 @@ Searches all hives including unloaded user profiles for "evil.exe".
             $results = Get-RunKeysOnly
         }
         else {
-            # Validate search parameters
-            if ($Search.Count -eq 0) {
-                Write-Error "Search parameter is required when not using -RunKeys"
+            # Search mode - Search parameter already validated by logic above
+            
+            # if (-not $Quiet) {
+            #     Write-Host "[INFO] Searching registry for: $($Search -join ', ')" -ForegroundColor Yellow
+            #     Write-Host "[INFO] Search Type: $Type, Hive: $script:HiveFilter" -ForegroundColor Cyan
+            #     if ($Path -and $Path.Count -gt 0) {
+            #         Write-Host "[INFO] Limited to paths: $($Path -join ', ')" -ForegroundColor Cyan
+            #     }
+            # }
+            
+            # Determine paths to search - either user-specified or all hives
+            $searchPaths = Get-RegistryPathsToSearch -UserPaths $Path -HiveFilter $script:HiveFilter -AvailableHives $systemAndUsersHives
+            
+            if (-not $searchPaths -or $searchPaths.Count -eq 0) {
+                Write-Warning "No valid registry paths to search. Verify path format and permissions."
+                if ($PassThru) {
+                    return @()
+                }
                 return
             }
             
-            if (-not $Quiet) {
-                Write-Host "[INFO] Searching registry for: $($Search -join ', ')" -ForegroundColor Yellow
-                Write-Host "[INFO] Search Type: $Type, Hive: $script:HiveFilter" -ForegroundColor Cyan
-            }
-            
-            # Registry hives already loaded by Get-RegistryHivesForAnalysis
-            
-            # Search each hive
-            foreach ($registryHive in $systemAndUsersHives) {
+            # Search each path
+            foreach ($registryPath in $searchPaths) {
                 try {
                     if (-not $Quiet) {
                         # Extract hive name for display
-                        if ($registryHive -like "*Registry::HKEY_LOCAL_MACHINE*") {
-                            $displayHiveName = "HKEY_LOCAL_MACHINE"
+                        $displayName = Get-HiveNameFromPath -HivePath $registryPath
+                        
+                        # Show more detail if it's a specific path vs full hive
+                        if ($registryPath -match '\\') {
+                            $pathParts = $registryPath -split '\\'
+                            if ($pathParts.Count -gt 2) {
+                                $displayName = "$displayName\...\$($pathParts[-1])"
+                            }
                         }
-                        elseif ($registryHive -like "*Registry::HKEY_CURRENT_USER*") {
-                            $displayHiveName = "HKEY_CURRENT_USER"
-                        }
-                        elseif ($registryHive -like "*Registry::HKEY_CLASSES_ROOT*") {
-                            $displayHiveName = "HKEY_CLASSES_ROOT"
-                        }
-                        elseif ($registryHive -like "*Registry::HKEY_USERS*") {
-                            $displayHiveName = "HKEY_USERS"
-                        }
-                        elseif ($registryHive -like "*Registry::HKEY_CURRENT_CONFIG*") {
-                            $displayHiveName = "HKEY_CURRENT_CONFIG"
-                        }
-                        else {
-                            $displayHiveName = Split-Path $registryHive -Leaf
-                        }
-                        Write-Host "[SEARCH] Processing hive: $displayHiveName" -ForegroundColor Cyan
+                        
+                        Write-Host "[SEARCH] Processing: $displayName" -ForegroundColor Cyan
                     }
         
-                    $hiveResults = Search-RegistryRecursive -HivePath $registryHive -SearchTerms $Search -SearchType $Type
+                    $hiveResults = Search-RegistryRecursive -HivePath $registryPath -SearchTerms $Search -SearchType $Type
                     if ($hiveResults) {
                         $results += $hiveResults
                     }
                 }
                 catch {
-                    Write-Verbose "Error searching hive $registryHive : $($_.Exception.Message)"
+                    Write-Verbose "Error searching path $registryPath : $($_.Exception.Message)"
                     continue
                 }
             }
@@ -23121,6 +23365,10 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 foreach ($result in $results) {
                     Write-ColoredRegistryResult $result
                 }
+                
+                # Print closing separator
+                Write-Host ""
+                Write-Host "----------------------------------------" -ForegroundColor Gray
             }
             
             # Export to CSV if requested
@@ -23143,10 +23391,7 @@ Searches all hives including unloaded user profiles for "evil.exe".
                 Write-Host "`n[INFO] No registry matches found" -ForegroundColor Yellow
             }
             
-            # Create empty CSV if requested
-            if ($OutputCSV) {
-                Export-ResultsToCSV -Results @() -OutputPath $OutputCSV | Out-Null
-            }
+            # No CSV export for empty results (avoid creating empty files)
             
             if ($PassThru) {
                 return @()
@@ -23489,24 +23734,47 @@ function Hunt-Services {
     # Get CSV filename
     function Get-CSVFileName {
         param([string]$OutputPath)
+        
+        if ([string]::IsNullOrWhiteSpace($OutputPath)) { 
+            return $null 
+        }
+        
         try {
-            if ([string]::IsNullOrWhiteSpace($OutputPath)) { return $null }
-            
+            # Check if path is a directory
             if (Test-Path $OutputPath -PathType Container -ErrorAction SilentlyContinue) {
                 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
                 return Join-Path $OutputPath "Hunt-Services_Results_$($env:COMPUTERNAME)_$timestamp.csv"
             }
-            elseif ($OutputPath -match '\.csv$') {
+            
+            # Check if it's a CSV file path
+            if ($OutputPath -match '\.csv$') {
                 $parentDir = Split-Path $OutputPath -Parent
+                
+                # If no parent directory or parent exists, return path
                 if ([string]::IsNullOrWhiteSpace($parentDir) -or (Test-Path $parentDir -PathType Container -ErrorAction SilentlyContinue)) {
                     return $OutputPath
                 }
-                New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction Stop | Out-Null
-                return $OutputPath
+                
+                # Try to create parent directory
+                try {
+                    New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction Stop | Out-Null
+                    Write-Verbose "[INFO]: Created directory: $parentDir"
+                    return $OutputPath
+                }
+                catch {
+                    Write-Warning "Could not create directory: $parentDir"
+                    return $null
+                }
             }
+            
+            # Invalid path format
+            Write-Warning "Invalid OutputCSV path specified: $OutputPath"
             return $null
         }
-        catch { return $null }
+        catch {
+            Write-Warning "Error processing OutputCSV path: $($_.Exception.Message)"
+            return $null
+        }
     }
 
     # Main execution
@@ -23654,24 +23922,25 @@ function Hunt-Services {
                 }
                 Write-Host $result.Status -ForegroundColor $statusColor
                 
-                # Smart display logic for Command Line and Executable Path
-                # Only show both if they're meaningfully different (not just quotes)
-                $showBothPaths = $true
-                if (-not $More -and $result.CommandLine -and $result.ExecutablePath) {
-                    # Normalize both paths for comparison (remove quotes and trim)
-                    $normalizedCmd = $result.CommandLine.Trim().Trim('"').Trim("'")
-                    $normalizedExe = $result.ExecutablePath.Trim().Trim('"').Trim("'")
+                # Display Command Line only in -More mode or if different from ExecutablePath
+                if ($result.CommandLine) {
+                    $showCommandLine = $More
                     
-                    # If they're the same after normalization, only show Executable Path
-                    if ($normalizedCmd -eq $normalizedExe) {
-                        $showBothPaths = $false
+                    # In default mode, only show if meaningfully different from ExecutablePath
+                    if (-not $More -and $result.ExecutablePath) {
+                        $normalizedCmd = $result.CommandLine.Trim().Trim('"').Trim("'")
+                        $normalizedExe = $result.ExecutablePath.Trim().Trim('"').Trim("'")
+                        
+                        # Show if they're different after normalization
+                        if ($normalizedCmd -ne $normalizedExe) {
+                            $showCommandLine = $true
+                        }
                     }
-                }
-                
-                # Display Command Line only if needed
-                if ($result.CommandLine -and ($More -or $showBothPaths)) {
-                    Write-Host "Command Line     : " -NoNewline -ForegroundColor Yellow
-                    Write-Host $result.CommandLine -ForegroundColor Red
+                    
+                    if ($showCommandLine) {
+                        Write-Host "Command Line     : " -NoNewline -ForegroundColor Yellow
+                        Write-Host $result.CommandLine -ForegroundColor Red
+                    }
                 }
                 
                 # Always display Executable Path if available
@@ -23721,6 +23990,12 @@ function Hunt-Services {
             try {
                 $csvPath = Get-CSVFileName -OutputPath $OutputCSV
                 if ($csvPath) {
+                    # Ensure parent directory exists
+                    $parentDir = Split-Path $csvPath -Parent
+                    if (-not [string]::IsNullOrWhiteSpace($parentDir) -and -not (Test-Path $parentDir -PathType Container)) {
+                        New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction Stop | Out-Null
+                    }
+                    
                     $csvData = $results | ForEach-Object {
                         [PSCustomObject]@{
                             ServiceName    = Sanitize-CSVValue $_.ServiceName
@@ -23744,10 +24019,20 @@ function Hunt-Services {
                     if (-not $Quiet) {
                         Write-Host "[+] Results exported to CSV: $csvPath" -ForegroundColor Green
                     }
+                    Write-Verbose "[INFO]: CSV export successful: $csvPath"
+                }
+                else {
+                    Write-Warning "CSV export failed: Unable to determine output path"
                 }
             }
             catch {
                 Write-Warning "Failed to export CSV: $($_.Exception.Message)"
+                Write-Verbose "[ERROR]: CSV export failed: $($_.Exception.Message)"
+            }
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($OutputCSV) -and $results.Count -eq 0) {
+            if (-not $Quiet) {
+                Write-Host "[!] No results to export to CSV (no services matched criteria)" -ForegroundColor Yellow
             }
         }
         
