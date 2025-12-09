@@ -8220,12 +8220,6 @@ $(
         $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $OutputDir = "C:\ForensicDump_$($env:COMPUTERNAME)_$timestamp"
     }
-    
-    # Setup output directory and expand to full path
-    if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $OutputDir = "C:\ForensicDump_$($env:COMPUTERNAME)_$timestamp"
-    }
     else {
         # Validate OutputDir is not just whitespace or invalid characters
         if ([string]::IsNullOrWhiteSpace($OutputDir.Trim())) {
@@ -8595,14 +8589,14 @@ $(
             }
             
             # Date range parameters - Hunt-Browser handles these internally
-            # Don't convert to string format - pass datetime objects or relative strings
-            if ($StartDate) { 
-                $browserParams['StartDate'] = $StartDate
-                Write-Verbose "Browser StartDate: $StartDate"
+            # Pass parsed datetime objects for consistency
+            if ($parsedStartDate) { 
+                $browserParams['StartDate'] = $parsedStartDate
+                Write-Verbose "Browser StartDate: $parsedStartDate"
             }
-            if ($EndDate) { 
-                $browserParams['EndDate'] = $EndDate
-                Write-Verbose "Browser EndDate: $EndDate"
+            if ($parsedEndDate) { 
+                $browserParams['EndDate'] = $parsedEndDate
+                Write-Verbose "Browser EndDate: $parsedEndDate"
             }
             
             Write-Host "  [-] Calling Hunt-Browser..." -ForegroundColor DarkGray
@@ -8612,7 +8606,7 @@ $(
             $browserResults = $null
             try {
                 # CRITICAL: Do NOT use 2>&1 6>$null - it prevents return values
-                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop
+                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop -InformationAction SilentlyContinue -WarningAction SilentlyContinue
                 
                 if ($null -eq $browserResults) {
                     Write-Verbose "Hunt-Browser returned null - will check cache"
@@ -8663,7 +8657,7 @@ $(
                     $global:HuntBrowserCache_LoadTool.RawRecords -and 
                     $global:HuntBrowserCache_LoadTool.RawRecords.Count -gt 0) {
                     
-                    Write-Host "  [i] Recovering $($global:HuntBrowserCache_LoadTool.RawRecords.Count) records from cache" -ForegroundColor Cyan
+                    Write-Host "  [i] Recovering $($global:HuntBrowserCache_LoadTool.RawRecords.Count) records from cache" -ForegroundColor DarkGray
                     
                     # Convert cached records to ForensicDump format
                     $convertedResults = @()
@@ -8692,7 +8686,7 @@ $(
                     }
                     
                     if ($convertedResults.Count -gt 0) {
-                        Write-Host "  [+] Recovered $($convertedResults.Count) records from cache" -ForegroundColor Green
+                        Write-Host "  [+] Recovered $($convertedResults.Count) records from cache" -ForegroundColor DarkGray
                         $browserResults = $convertedResults
                     }
                 }
@@ -8745,7 +8739,7 @@ $(
                         # CRITICAL: Assign validated results to forensicData
                         $forensicData.Browser = $validResults
                         
-                        Write-Host "  [+] Collected $($validResults.Count) browser entries" -ForegroundColor Green
+                        Write-Host "  [+] Collected $($validResults.Count) browser entries" -ForegroundColor DarkGray
                         
                         # Show sample of what was found (with proper null checks)
                         if ($VerbosePreference -eq 'Continue') {
@@ -9007,7 +9001,7 @@ $(
         $htmlMaxRows = $MaxRows
         $htmlAllFields = $AllFields
 
-        Generate-HTMLReport -ForensicData $forensicData -OutputPath $htmlPath -CSVDir $csvDir `
+        Generate-HTMLReport -ForensicData $forensicData -OutputPath $htmlPath -CSVDir $csvDir -OutputDir $OutputDir `
             -StartDate $parsedStartDate -EndDate $parsedEndDate -Mode $(if ($Aggressive) { "Aggressive" } else { "Auto" }) `
             -MaxChars $htmlMaxChars -MaxRows $htmlMaxRows -AllFields:$htmlAllFields
     }
@@ -9041,7 +9035,6 @@ $(
     Write-Host "[+] Output Directory: $OutputDir" -ForegroundColor Green
     Write-Host "[+] Forensic Report: $(Join-Path $OutputDir 'ForensicReport.html')" -ForegroundColor Green
     Write-Host "[+] Raw Data Exports: $(Join-Path $OutputDir 'ForensicData_CSV')" -ForegroundColor Green
-    #Write-Host "[+] HTML Data: $(Join-Path $OutputDir 'JSON_Files')" -ForegroundColor Green
     
     if ($ExportLogs) {
         Write-Host "[+] EVTX Export: $(Join-Path $OutputDir 'EVTX_Export')" -ForegroundColor Green
