@@ -8761,7 +8761,7 @@ $(
                                         $displayText = $sample.FullString.Substring(0, [Math]::Min(80, $sample.FullString.Length))
                                     }
                                     elseif ($sample.PSObject.Properties['String'] -and 
-                                            ![string]::IsNullOrWhiteSpace($sample.String)) {
+                                        ![string]::IsNullOrWhiteSpace($sample.String)) {
                                         $displayText = $sample.String.Substring(0, [Math]::Min(80, $sample.String.Length))
                                     }
                                     
@@ -8777,10 +8777,8 @@ $(
                         }
                     }
                     else {
-                        # Ensure empty array is assigned if no valid results
+                        # No valid results after filtering
                         $forensicData.Browser = @()
-                    }
-                    else {
                         Write-Host "  [!] No valid browser entries after filtering" -ForegroundColor Yellow
                         Write-Host "  [i] Hunt-Browser may have returned only errors or empty data" -ForegroundColor Cyan
                         Write-Host "  [i] Try: Hunt-Browser -All to test browser extraction directly" -ForegroundColor Cyan
