@@ -17,22 +17,22 @@
 
 #   Function Reviews and Future Features:
 # ========================================
+# - Hunt-ForensicDump: add a switch for "-onlyjson" for outputting only that main JSON file that can be used for building reports offline (make sure that always has all the rows all data?)
 # - Hunt-ForensicDump: could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
 # - Hunt-ForensicDump: add a base64 string of the Compressed Arrchive of all EVTX logs? That way you will always have all event logs..... is this possible?
 # - Hunt-ForensicDump: Review CSV Output files for formatting/etc.
 # - Hunt-Logs: add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
-# - Hunt-Files: Add 'Caching' functionality for file searches
+# - Hunt-Files: Add 'Caching' functionality for file searches?
+
 # - Hunt-Registry: Add '-RunMRU' switch so it easily points out clickfix attacks, easy to read clear output
+
 
 #   Final/Full Review & To Do
 # --------------------------------------------
+# - Hunt-ForensicDump: Combine the "Export Info" and "Settings" page... might want to add more settings if applicable
+# - Hunt-ForensicDump: Review logic for getting DNS and Domain Controller servers
 
-# - Hunt-ForensicDump: Add something to enumerate local admins (which accounts have Administrator privileges?)
-# - Hunt-ForensicDump: Random error "Error rendering table: Cannot read properties of undefined (reading 'toLocaleString')" <--- Random unknown log table in 'Event Logs' tab [its happening with multiple tables, might just be blank tables erroring out]
-# - Hunt-ForensicDump: Add PID and TID to event logs..
-# - Hunt-ForensicDump: In the Persistence tab, move the "Flag" field to the front, and sort by it (non null values at the top)
-# - Hunt-ForensicDump: change the 'Settings' tab "Max Rows Per Table" control. it doesnt do anything helpful-- atleast tell users you can only go down... the "Max Chars Per Cell" does however work...
-# - Hunt-ForensicDump: Might want to reorganize the tabs. Put the most used first... least used towards the right side...
+
 
 
 # - Hunt-ForensicDump: make sure all new sub function features are implemented corrrectly... validate that updated and new sub-functions work comprehensively 
@@ -2964,25 +2964,34 @@ function Hunt-ForensicDump {
                             if ($isGroup) {
                                 $adminDetails.NestedGroups += $memberObj
                                 
-                                # Expand nested group members recursively
+                                # Expand nested group members (one level only to avoid infinite loops)
                                 try {
-                                    $groupMembers = Get-LocalGroupMember -SID $member.SID -ErrorAction SilentlyContinue
-                                    if ($groupMembers) {
-                                        foreach ($groupMember in $groupMembers) {
-                                            $nestedMemberObj = [PSCustomObject]@{
-                                                Name        = $groupMember.Name
-                                                Type        = $groupMember.ObjectClass
-                                                SID         = $groupMember.SID.Value
-                                                Source      = $groupMember.PrincipalSource
-                                                IsDomain    = $groupMember.PrincipalSource -eq 'ActiveDirectory'
-                                                ParentGroup = $member.Name
+                                    # Only expand local groups (domain groups may have circular references)
+                                    if ($member.PrincipalSource -ne 'ActiveDirectory') {
+                                        $groupMembers = Get-LocalGroupMember -SID $member.SID -ErrorAction SilentlyContinue
+                                        if ($groupMembers) {
+                                            foreach ($groupMember in $groupMembers) {
+                                                # Skip if this member is itself a group (prevent recursion)
+                                                if ($groupMember.ObjectClass -ne 'Group') {
+                                                    $nestedMemberObj = [PSCustomObject]@{
+                                                        Name        = $groupMember.Name
+                                                        Type        = $groupMember.ObjectClass
+                                                        SID         = $groupMember.SID.Value
+                                                        Source      = $groupMember.PrincipalSource
+                                                        IsDomain    = $groupMember.PrincipalSource -eq 'ActiveDirectory'
+                                                        ParentGroup = $member.Name
+                                                    }
+                                                    $adminDetails.AllMembers += $nestedMemberObj
+                                                }
                                             }
-                                            $adminDetails.AllMembers += $nestedMemberObj
                                         }
+                                    }
+                                    else {
+                                        Write-Verbose "Skipping expansion of domain group: $($member.Name) (may have circular references)"
                                     }
                                 }
                                 catch {
-                                    Write-Verbose "Could not expand group: $($member.Name)"
+                                    Write-Verbose "Could not expand group: $($member.Name) - $($_.Exception.Message)"
                                 }
                             }
                             else {
@@ -3034,12 +3043,23 @@ function Hunt-ForensicDump {
 
             Write-Host "  [-] Detecting domain controller and DNS configuration..." -ForegroundColor DarkGray
             try {
-                # Get primary DNS server
+                # Get primary DNS server from active network adapters only
                 $primaryDNS = @()
                 if ($sysInfo.DNSServers) {
                     foreach ($dnsConfig in $sysInfo.DNSServers) {
+                        # Only get DNS from interfaces that are up and have addresses
                         if ($dnsConfig.ServerAddresses -and $dnsConfig.ServerAddresses.Count -gt 0) {
-                            $primaryDNS += $dnsConfig.ServerAddresses[0]
+                            # Filter out invalid DNS addresses (localhost, empty, etc.)
+                            foreach ($dnsAddr in $dnsConfig.ServerAddresses) {
+                                if (![string]::IsNullOrWhiteSpace($dnsAddr) -and 
+                                    $dnsAddr -ne '127.0.0.1' -and 
+                                    $dnsAddr -ne '::1' -and
+                                    $dnsAddr -ne 'fec0:0:0:ffff::1' -and
+                                    $dnsAddr -ne 'fec0:0:0:ffff::2' -and
+                                    $dnsAddr -ne 'fec0:0:0:ffff::3') {
+                                    $primaryDNS += $dnsAddr
+                                }
+                            }
                         }
                     }
                 }
@@ -3050,24 +3070,28 @@ function Hunt-ForensicDump {
                 $logonServer = "N/A"
             
                 if ($sysInfo.IsDomainJoined) {
-                    # Method 1: Use environment variable
-                    $logonServer = $env:LOGONSERVER -replace '\\\\', ''
+                    # Method 1: Use environment variable (most reliable for current DC)
+                    if (![string]::IsNullOrWhiteSpace($env:LOGONSERVER)) {
+                        $logonServer = $env:LOGONSERVER -replace '\\\\', ''
+                    }
                 
-                    # Method 2: Try nltest to get DC info
+                    # Method 2: Try nltest to get authoritative DC info
                     try {
                         $nltestOutput = nltest /dsgetdc:$($sysInfo.Domain) 2>$null
                         if ($LASTEXITCODE -eq 0 -and $nltestOutput) {
                             foreach ($line in $nltestOutput) {
-                                if ($line -match 'DC:\s*(.+)') {
+                                if ($line -match 'DC:\s*\\\\(.+)') {
                                     $dcName = $matches[1].Trim()
                                     if (![string]::IsNullOrWhiteSpace($dcName)) {
-                                        $logonServer = $dcName -replace '\\\\', ''
+                                        # Only override if we got a better name
+                                        if ($logonServer -eq "N/A" -or $dcName -notlike "*$logonServer*") {
+                                            $logonServer = $dcName
+                                        }
                                     }
                                 }
-                                elseif ($line -match 'DC Address:\s*(.+)') {
-                                    $dcAddress = $matches[1].Trim()
-                                    if ($dcAddress -match '\d+\.\d+\.\d+\.\d+') {
-                                        $dcIP = $matches[0]
+                                elseif ($line -match 'DC Address:\s*\\\\(\d+\.\d+\.\d+\.\d+)') {
+                                    $dcIP = $matches[1].Trim()
+                                    if (![string]::IsNullOrWhiteSpace($dcIP)) {
                                         if (-not $dcInfo) { $dcInfo = @{} }
                                         $dcInfo.IPAddress = $dcIP
                                     }
@@ -3079,18 +3103,46 @@ function Hunt-ForensicDump {
                         Write-Verbose "nltest command failed: $($_.Exception.Message)"
                     }
                 
-                    # Method 3: Try to resolve logon server
-                    if ($logonServer -ne "N/A") {
+                    # Method 3: Try to resolve logon server to get IP
+                    if ($logonServer -ne "N/A" -and ![string]::IsNullOrWhiteSpace($logonServer)) {
                         try {
-                            $dcResolved = Resolve-DnsName -Name $logonServer -ErrorAction SilentlyContinue
-                            if ($dcResolved) {
+                            # Try both short name and FQDN
+                            $dcResolved = $null
+                            
+                            # First try as-is
+                            $dcResolved = Resolve-DnsName -Name $logonServer -Type A -ErrorAction SilentlyContinue | 
+                            Where-Object { $_.Type -eq 'A' } | 
+                            Select-Object -First 1
+                            
+                            # If that fails and we have a domain, try FQDN
+                            if (-not $dcResolved -and ![string]::IsNullOrWhiteSpace($sysInfo.Domain)) {
+                                $fqdn = "$logonServer.$($sysInfo.Domain)"
+                                $dcResolved = Resolve-DnsName -Name $fqdn -Type A -ErrorAction SilentlyContinue | 
+                                Where-Object { $_.Type -eq 'A' } | 
+                                Select-Object -First 1
+                            }
+                            
+                            if ($dcResolved -and $dcResolved.IPAddress) {
                                 if (-not $dcInfo) { $dcInfo = @{} }
                                 $dcInfo.Name = $logonServer
-                                $dcInfo.IPAddress = ($dcResolved | Where-Object { $_.Type -eq 'A' } | Select-Object -First 1).IPAddress
+                                # Only set IP if we don't already have one from nltest
+                                if (-not $dcInfo.IPAddress) {
+                                    $dcInfo.IPAddress = $dcResolved.IPAddress
+                                }
                             }
                         }
                         catch {
                             Write-Verbose "Could not resolve DC: $($_.Exception.Message)"
+                        }
+                    }
+                    
+                    # Final validation: ensure dcInfo has both name and IP
+                    if ($dcInfo) {
+                        if (-not $dcInfo.Name) {
+                            $dcInfo.Name = $logonServer
+                        }
+                        if (-not $dcInfo.IPAddress) {
+                            $dcInfo.IPAddress = "N/A"
                         }
                     }
                 }
@@ -4982,7 +5034,6 @@ function Hunt-ForensicDump {
             <button class="tab-button" onclick="showTab('services')">Services ($($stats.Services))</button>
             <button class="tab-button" onclick="showTab('files')">Files ($($stats.Files))</button>
             <button class="tab-button" onclick="showTab('registry')">Registry ($($stats.Registry))</button>
-            <button class="tab-button" onclick="showTab('export')">Export Info</button>
             <button class="tab-button" onclick="showTab('settings')">Settings</button>
         </div>
     </div>
@@ -5176,82 +5227,6 @@ function Hunt-ForensicDump {
                             'N/A' 
                         }
                     )</span></div>
-                </div>
-            </div>
-        </div>
-        
-        <div id="export-tab" class="tab-content">
-            <h2 style="color: #3498db; margin-bottom: 20px;">Export Information</h2>
-            
-            <div class="export-info-card">
-                <h3>Collection Details</h3>
-                <div class="export-info-item">
-                    <span class="export-info-label">Report Generated:</span>
-                    <span class="export-info-value">$reportDate</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Collection Period:</span>
-                    <span class="export-info-value">$StartDate to $EndDate</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Collection Mode:</span>
-                    <span class="export-info-value">$Mode</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Total Runtime:</span>
-                    <span class="export-info-value" id="runtime-display">Calculating...</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">PowerShell Version:</span>
-                    <span class="export-info-value">$($PSVersionTable.PSVersion)</span>
-                </div>
-            </div>
-            
-            <div class="export-info-card">
-                <h3>Output Locations</h3>
-                <div class="export-info-item">
-                    <span class="export-info-label">Output Folder:</span>
-                    <span class="export-info-value"><a href="file:///$($OutputDir.Replace('\', '/'))" class="export-link" title="Open folder in Explorer">$OutputDir</a></span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">HTML Report:</span>
-                    <span class="export-info-value"><a href="file:///$($OutputDir.Replace('\', '/'))/ForensicReport.html" class="export-link" title="Open HTML report">$(Join-Path $OutputDir 'ForensicReport.html')</a></span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">CSV Data Folder:</span>
-                    <span class="export-info-value"><a href="file:///$($OutputDir.Replace('\', '/'))/ForensicData_CSV/" class="export-link" title="Open CSV folder">$(Join-Path $OutputDir 'ForensicData_CSV')</a></span>
-                </div>
-            </div>
-            
-            <div class="export-info-card">
-                <h3>Data Collection Summary</h3>
-                <div class="export-info-item">
-                    <span class="export-info-label">Persistence Items:</span>
-                    <span class="export-info-value">$($stats.Persistence) records</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Files Analyzed:</span>
-                    <span class="export-info-value">$($stats.Files) files</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Registry Entries:</span>
-                    <span class="export-info-value">$($stats.Registry) entries</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Browser History:</span>
-                    <span class="export-info-value">$($stats.Browser) records</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Event Logs:</span>
-                    <span class="export-info-value">$($stats.Logs) events</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Services:</span>
-                    <span class="export-info-value">$($stats.Services) services</span>
-                </div>
-                <div class="export-info-item">
-                    <span class="export-info-label">Scheduled Tasks:</span>
-                    <span class="export-info-value">$($stats.Tasks) tasks</span>
                 </div>
             </div>
         </div>
@@ -6068,18 +6043,21 @@ $(
         </div>
         
         <div id="settings-tab" class="tab-content">
-            <div class="csv-section">
-                <h2 style="color: #3498db; margin-bottom: 15px;">Display Settings</h2>
-                <div style="background: var(--bg-secondary); padding: 20px; border-radius: 8px; max-width: 700px; border: 1px solid var(--border-color);">
-                    <div style="background: var(--bg-tertiary); padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid var(--accent-blue);">
-                        <p style="color: var(--text-secondary); font-size: 0.9em; margin: 0; line-height: 1.6;">
-                            <strong>Important:</strong> This report contains data up to the original MaxRows limit ($MaxRows). 
-                            You can only REDUCE the display limit here, not increase it. To embed more data in the report, 
-                            re-run Hunt-ForensicDump with a higher -MaxRows parameter value.
-                        </p>
-                    </div>
-                    
-                    <div style="margin-bottom: 20px;">
+            <h2 style="color: #3498db; margin-bottom: 20px;">Settings & Export Information</h2>
+            
+            <!-- Display Settings Section -->
+            <div class="section-card" style="margin-bottom: 30px;">
+                <h3>Display Settings</h3>
+                <div style="background: var(--bg-tertiary); padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid var(--accent-blue);">
+                    <p style="color: var(--text-secondary); font-size: 0.9em; margin: 0; line-height: 1.6;">
+                        <strong>Important:</strong> This report contains data up to the original MaxRows limit ($MaxRows). 
+                        You can only REDUCE the display limit here, not increase it. To embed more data in the report, 
+                        re-run Hunt-ForensicDump with a higher -MaxRows parameter value.
+                    </p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                    <div>
                         <label style="display: block; color: var(--text-primary); margin-bottom: 10px; font-weight: bold;">
                             <span style="font-size: 1.1em;">Maximum Rows Per Table</span>
                         </label>
@@ -6093,11 +6071,11 @@ $(
                         </p>
                     </div>
                     
-                    <div style="margin-bottom: 20px;">
+                    <div>
                         <label style="display: block; color: var(--text-primary); margin-bottom: 10px; font-weight: bold;">
                             <span style="font-size: 1.1em;">Maximum Characters Per Cell</span>
                         </label>
-                                        <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px;">
+                        <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px;">
                             Text longer than this limit will be truncated with "..." Hover over truncated cells to see preview of content.
                         </p>
                         <input type="number" id="settings-maxchars" value="$MaxChars" min="50" step="50" 
@@ -6105,20 +6083,96 @@ $(
                         <p style="color: var(--text-dark); font-size: 0.85em; margin-top: 8px;">
                             Currently truncating at: <span id="current-maxchars" style="color: var(--accent-blue); font-weight: bold;">$MaxChars</span> characters
                         </p>
-                    </div>                    
-                    <button onclick="applySettings()" 
-                        style="width: 100%; padding: 15px; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1.1em; font-weight: bold; transition: background 0.3s;"
-                        onmouseover="this.style.background='var(--accent-blue-hover)'"
-                        onmouseout="this.style.background='var(--accent-blue)'">
-                        Apply Settings
-                    </button>
+                    </div>
+                </div>
+                
+                <button onclick="applySettings()" 
+                    style="width: 100%; padding: 15px; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1.1em; font-weight: bold; transition: background 0.3s;"
+                    onmouseover="this.style.background='var(--accent-blue-hover)'"
+                    onmouseout="this.style.background='var(--accent-blue)'">
+                    Apply Settings
+                </button>
 
-                    <div style="margin-top: 15px; padding: 12px; background: var(--bg-tertiary); border-radius: 4px; border-left: 4px solid var(--accent-yellow);">
-                        <p style="color: var(--text-secondary); font-size: 0.85em; margin: 0; line-height: 1.5;">
-                            <strong>Note:</strong> After applying, switch to any data tab to see the updated display limits. 
-                            For full datasets beyond the embedded limit, download CSV files.
-                        </p>
-                    </div>                
+                <div style="margin-top: 15px; padding: 12px; background: var(--bg-tertiary); border-radius: 4px; border-left: 4px solid var(--accent-yellow);">
+                    <p style="color: var(--text-secondary); font-size: 0.85em; margin: 0; line-height: 1.5;">
+                        <strong>Note:</strong> After applying, switch to any data tab to see the updated display limits. 
+                        For full datasets beyond the embedded limit, download CSV files.
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Export Information Section -->
+            <div class="section-card" style="margin-bottom: 20px;">
+                <h3>Collection Details</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">Report Generated:</span>
+                        <span class="sysinfo-value">$reportDate</span>
+                    </div>
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">Collection Period:</span>
+                        <span class="sysinfo-value">$StartDate to $EndDate</span>
+                    </div>
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">Collection Mode:</span>
+                        <span class="sysinfo-value">$Mode</span>
+                    </div>
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">PowerShell Version:</span>
+                        <span class="sysinfo-value">$($PSVersionTable.PSVersion)</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section-card" style="margin-bottom: 20px;">
+                <h3>Output Locations</h3>
+                <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">Output Folder:</span>
+                        <span class="sysinfo-value"><a href="file:///$($OutputDir.Replace('\', '/'))" class="vt-link" title="Open folder in Explorer">$OutputDir</a></span>
+                    </div>
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">HTML Report:</span>
+                        <span class="sysinfo-value"><a href="file:///$($OutputDir.Replace('\', '/'))/ForensicReport.html" class="vt-link" title="Open HTML report">$(Join-Path $OutputDir 'ForensicReport.html')</a></span>
+                    </div>
+                    <div class="sysinfo-item">
+                        <span class="sysinfo-label">CSV Data Folder:</span>
+                        <span class="sysinfo-value"><a href="file:///$($OutputDir.Replace('\', '/'))/ForensicData_CSV/" class="vt-link" title="Open CSV folder">$(Join-Path $OutputDir 'ForensicData_CSV')</a></span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>Data Collection Summary</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Persistence)</div>
+                        <div class="stat-label">Persistence Items</div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Files)</div>
+                        <div class="stat-label">Files Analyzed</div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Registry)</div>
+                        <div class="stat-label">Registry Entries</div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Browser)</div>
+                        <div class="stat-label">Browser Records</div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Logs)</div>
+                        <div class="stat-label">Event Logs</div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Services)</div>
+                        <div class="stat-label">Services</div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-tertiary); padding: 15px;">
+                        <div class="stat-number" style="font-size: 2em;">$($stats.Tasks)</div>
+                        <div class="stat-label">Scheduled Tasks</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -8556,11 +8610,9 @@ $(
             
             # Call Hunt-Browser and capture results
             $browserResults = $null
-            $browserError = $null
             try {
                 # CRITICAL: Do NOT use 2>&1 6>$null - it prevents return values
-                # Use -ErrorVariable to capture errors without blocking returns
-                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop -ErrorVariable browserError
+                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop
                 
                 if ($null -eq $browserResults) {
                     Write-Verbose "Hunt-Browser returned null - will check cache"
@@ -8689,23 +8741,44 @@ $(
                         }
                     }
                     
-                    $forensicData.Browser = $validResults
-                    
                     if ($validResults.Count -gt 0) {
+                        # CRITICAL: Assign validated results to forensicData
+                        $forensicData.Browser = $validResults
+                        
                         Write-Host "  [+] Collected $($validResults.Count) browser entries" -ForegroundColor Green
                         
-                        # Show sample of what was found
-                        $sampleCount = [Math]::Min(3, $validResults.Count)
-                        Write-Verbose "Sample browser entries (first $sampleCount):"
-                        for ($i = 0; $i -lt $sampleCount; $i++) {
-                            $sample = $validResults[$i]
-                            if ($sample.PSObject.Properties['FullString']) {
-                                Write-Verbose "  - $($sample.FullString.Substring(0, [Math]::Min(80, $sample.FullString.Length)))"
-                            }
-                            elseif ($sample.PSObject.Properties['String']) {
-                                Write-Verbose "  - $($sample.String.Substring(0, [Math]::Min(80, $sample.String.Length)))"
+                        # Show sample of what was found (with proper null checks)
+                        if ($VerbosePreference -eq 'Continue') {
+                            $sampleCount = [Math]::Min(3, $validResults.Count)
+                            Write-Verbose "Sample browser entries (first $sampleCount):"
+                            for ($i = 0; $i -lt $sampleCount; $i++) {
+                                try {
+                                    $sample = $validResults[$i]
+                                    $displayText = ""
+                                    
+                                    if ($sample.PSObject.Properties['FullString'] -and 
+                                        ![string]::IsNullOrWhiteSpace($sample.FullString)) {
+                                        $displayText = $sample.FullString.Substring(0, [Math]::Min(80, $sample.FullString.Length))
+                                    }
+                                    elseif ($sample.PSObject.Properties['String'] -and 
+                                            ![string]::IsNullOrWhiteSpace($sample.String)) {
+                                        $displayText = $sample.String.Substring(0, [Math]::Min(80, $sample.String.Length))
+                                    }
+                                    
+                                    if ($displayText) {
+                                        Write-Verbose "  [$($i+1)] $displayText"
+                                    }
+                                }
+                                catch {
+                                    Write-Verbose "  [$($i+1)] [Error displaying sample]"
+                                    continue
+                                }
                             }
                         }
+                    }
+                    else {
+                        # Ensure empty array is assigned if no valid results
+                        $forensicData.Browser = @()
                     }
                     else {
                         Write-Host "  [!] No valid browser entries after filtering" -ForegroundColor Yellow
@@ -18606,7 +18679,16 @@ Returns extension objects with webRequest permissions for further analysis.
                         }
                 
                         if (-not $Quiet) {
-                            Write-Host "[SUCCESS]  Extracted $($results.Count) browser history entries" -ForegroundColor Green
+                            # Show accurate counts: cached vs filtered vs returned
+                            Write-Host "[SUCCESS]  BrowsingHistoryView executed successfully" -ForegroundColor Green
+                            Write-Host "[CACHE]    Cached $($csvData.Count) total records" -ForegroundColor Cyan
+                            
+                            if ($Search.Count -gt 0 -or $Exclude.Count -gt 0) {
+                                Write-Host "[FILTER]   Filtered to $($filteredRecords.Count) matching records" -ForegroundColor Cyan
+                            }
+                            
+                            Write-Host "[RETURN]   Returning $($results.Count) formatted results" -ForegroundColor Green
+                            
                             if ($userWantsCSV) {
                                 Write-Host "[SAVED]    CSV file preserved at: $outputCsv" -ForegroundColor Green
                             }
