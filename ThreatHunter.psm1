@@ -8508,8 +8508,9 @@ $(
         # Recommend LoadTool if not using it
         if (-not $LoadBrowserTool) {
             Write-Host "  [i] RECOMMENDED: Use -LoadBrowserTool for complete and accurate browser history extraction" -ForegroundColor Cyan
-            Write-Host "  [i] Using native mode (database string extraction) - may take longer" -ForegroundColor Cyan
+            Write-Host "  [i] Using native mode (string extraction from database files)" -ForegroundColor Cyan
         }
+        
         try {
             $browserParams = @{
                 PassThru  = $true
@@ -8529,59 +8530,42 @@ $(
                 }
                 else {
                     # No path provided - will download
-                    Write-Host "  [-] Using LoadTool mode (via NirSoft internet download)..." -ForegroundColor DarkGray
+                    Write-Host "  [-] Using LoadTool mode (NirSoft download)..." -ForegroundColor DarkGray
                 }
             }
             else {
                 # CRITICAL: Always specify -All mode for native extraction
-                # Hunt-Browser now requires explicit mode selection
+                # Hunt-Browser requires explicit mode selection
                 $browserParams['All'] = $true
-                Write-Host "  [-] Using native mode (database string extraction)..." -ForegroundColor DarkGray
+                Write-Host "  [-] Native mode: scanning browser database files..." -ForegroundColor DarkGray
             }
             
-            # Redirect stderr to stdout and capture
-            # Add date range parameters if specified
+            # Date range parameters - Hunt-Browser handles these internally
+            # Don't convert to string format - pass datetime objects or relative strings
             if ($StartDate) { 
-                try {
-                    $browserParams['StartDate'] = $parsedStartDate.ToString("yyyy-MM-dd HH:mm:ss")
-                }
-                catch {
-                    Write-Verbose "Could not format StartDate for browser extraction"
-                }
+                $browserParams['StartDate'] = $StartDate
+                Write-Verbose "Browser StartDate: $StartDate"
             }
             if ($EndDate) { 
-                try {
-                    $browserParams['EndDate'] = $parsedEndDate.ToString("yyyy-MM-dd HH:mm:ss")
-                }
-                catch {
-                    Write-Verbose "Could not format EndDate for browser extraction"
-                }
+                $browserParams['EndDate'] = $EndDate
+                Write-Verbose "Browser EndDate: $EndDate"
             }
             
-            Write-Verbose "Calling Hunt-Browser with parameters: $($browserParams.Keys -join ', ')"
-            $browserResults = Hunt-Browser @browserParams -Verbose:$false 2>&1 6>$null
+            Write-Host "  [-] Calling Hunt-Browser..." -ForegroundColor DarkGray
+            Write-Verbose "Hunt-Browser parameters: $($browserParams.Keys -join ', ')"
             
-            # Validate browser results before processing
-            if ($null -eq $browserResults) {
-                Write-Host "  [!] Browser extraction returned no data" -ForegroundColor Yellow
-                $browserResults = @()
+            # Call Hunt-Browser - capture all output including verbose/warnings
+            $browserResults = @()
+            try {
+                $browserResults = Hunt-Browser @browserParams -ErrorAction SilentlyContinue 2>&1 6>$null
             }
-            elseif ($browserResults -is [string]) {
-                if ($browserResults -like "*error*" -or $browserResults -like "*Exception*") {
-                    Write-Host "  [!] Browser extraction returned error: $browserResults" -ForegroundColor Yellow
-                    $browserResults = @()
-                }
-                else {
-                    # Single string result - wrap in array
-                    $browserResults = @($browserResults)
-                }
-            }
-            elseif ($browserResults -is [System.Management.Automation.ErrorRecord]) {
-                Write-Host "  [!] Browser extraction error: $($browserResults.Exception.Message)" -ForegroundColor Yellow
+            catch {
+                Write-Host "  [!] Hunt-Browser execution failed: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Verbose "Hunt-Browser error details: $($_.Exception.ToString())"
                 $browserResults = @()
             }
             
-            # Clear progress bars with error handling
+            # Clear progress bars
             $progressActivities = @(
                 "Hunt-Browser Analysis",
                 "Hunt-Browser",
@@ -8598,100 +8582,106 @@ $(
                 foreach ($activity in $progressActivities) {
                     Write-Progress -Activity $activity -Completed -ErrorAction SilentlyContinue
                 }
-                
-                # Force UI refresh
                 Start-Sleep -Milliseconds 50
-                foreach ($activity in $progressActivities) {
-                    Write-Progress -Activity $activity -Completed -ErrorAction SilentlyContinue
-                }
             }
             catch {
-                Write-Verbose "Could not clear all progress bars: $($_.Exception.Message)"
+                Write-Verbose "Could not clear progress bars: $($_.Exception.Message)"
             }
             
-            # Force UI refresh with multiple cycles
-            Start-Sleep -Milliseconds 50
-            foreach ($activity in $progressActivities) {
-                Write-Progress -Activity $activity -Completed -ErrorAction SilentlyContinue
-            }
-            Start-Sleep -Milliseconds 50
+            # Process and validate results
+            Write-Host "  [-] Processing browser results..." -ForegroundColor DarkGray
             
-            # Assign results with proper type handling
             if ($null -eq $browserResults) {
+                Write-Host "  [!] Hunt-Browser returned null" -ForegroundColor Yellow
                 $forensicData.Browser = @()
-                Write-Host "  [!] No browser data returned" -ForegroundColor Yellow
+            }
+            elseif ($browserResults -is [array] -and $browserResults.Count -eq 0) {
+                Write-Host "  [!] Hunt-Browser returned empty array - no browser data found" -ForegroundColor Yellow
+                Write-Host "  [i] This may indicate: no browsers installed, browsers currently running (files locked), or no history data" -ForegroundColor Cyan
+                $forensicData.Browser = @()
             }
             else {
                 try {
-                    # Filter out error records and strings
                     $validResults = @()
                     
-                    # Handle collections
-                    if ($browserResults -is [array] -or 
-                        $browserResults -is [System.Collections.Generic.List[PSObject]] -or 
-                        $browserResults -is [System.Collections.ArrayList]) {
-                        
-                        foreach ($item in $browserResults) {
-                            # Skip error records and strings
-                            if ($item -is [System.Management.Automation.ErrorRecord]) {
-                                Write-Verbose "Filtered out error record: $($item.Exception.Message)"
-                                continue
-                            }
-                            if ($item -is [string]) {
-                                # Check if it's an error message
-                                if ($item -like "*error*" -or $item -like "*failed*" -or $item -like "*exception*") {
-                                    Write-Verbose "Filtered out error string: $item"
-                                    continue
-                                }
-                            }
-                            
-                            # Valid PSObject or custom object
-                            if ($null -ne $item) {
-                                $validResults += $item
-                            }
-                        }
+                    # Normalize to array
+                    $resultsArray = @()
+                    if ($browserResults -is [array]) {
+                        $resultsArray = $browserResults
                     }
-                    elseif ($browserResults -is [PSCustomObject]) {
-                        $validResults = @($browserResults)
-                    }
-                    elseif ($browserResults -is [System.Management.Automation.ErrorRecord]) {
-                        Write-Host "  [!] Browser extraction returned error: $($browserResults.Exception.Message)" -ForegroundColor Yellow
-                        $validResults = @()
-                    }
-                    elseif ($browserResults -is [string]) {
-                        if ($browserResults -like "*error*" -or $browserResults -like "*failed*") {
-                            Write-Host "  [!] Browser extraction error: $browserResults" -ForegroundColor Yellow
-                            $validResults = @()
-                        }
-                        else {
-                            # Unexpected string result
-                            Write-Verbose "Hunt-Browser returned unexpected string: $browserResults"
-                            $validResults = @()
-                        }
+                    elseif ($browserResults -is [System.Collections.IEnumerable] -and $browserResults -isnot [string]) {
+                        $resultsArray = @($browserResults)
                     }
                     else {
-                        # Try to convert unknown type
-                        $validResults = @($browserResults)
+                        $resultsArray = @($browserResults)
+                    }
+                    
+                    Write-Verbose "Hunt-Browser returned $($resultsArray.Count) items"
+                    
+                    # Filter valid results
+                    foreach ($item in $resultsArray) {
+                        # Skip nulls
+                        if ($null -eq $item) {
+                            continue
+                        }
+                        
+                        # Skip error records
+                        if ($item -is [System.Management.Automation.ErrorRecord]) {
+                            Write-Verbose "Filtered error record: $($item.Exception.Message)"
+                            continue
+                        }
+                        
+                        # Skip error strings
+                        if ($item -is [string]) {
+                            if ($item -like "*error*" -or $item -like "*failed*" -or $item -like "*exception*" -or [string]::IsNullOrWhiteSpace($item)) {
+                                Write-Verbose "Filtered error/empty string: $item"
+                                continue
+                            }
+                        }
+                        
+                        # Valid result - must be PSCustomObject or have properties
+                        if ($item -is [PSCustomObject] -or $item.PSObject.Properties.Count -gt 0) {
+                            $validResults += $item
+                        }
+                        else {
+                            Write-Verbose "Filtered non-object item: $($item.GetType().Name)"
+                        }
                     }
                     
                     $forensicData.Browser = $validResults
                     
                     if ($validResults.Count -gt 0) {
                         Write-Host "  [+] Collected $($validResults.Count) browser entries" -ForegroundColor Green
+                        
+                        # Show sample of what was found
+                        $sampleCount = [Math]::Min(3, $validResults.Count)
+                        Write-Verbose "Sample browser entries (first $sampleCount):"
+                        for ($i = 0; $i -lt $sampleCount; $i++) {
+                            $sample = $validResults[$i]
+                            if ($sample.PSObject.Properties['FullString']) {
+                                Write-Verbose "  - $($sample.FullString.Substring(0, [Math]::Min(80, $sample.FullString.Length)))"
+                            }
+                            elseif ($sample.PSObject.Properties['String']) {
+                                Write-Verbose "  - $($sample.String.Substring(0, [Math]::Min(80, $sample.String.Length)))"
+                            }
+                        }
                     }
                     else {
-                        Write-Host "  [!] No valid browser entries found" -ForegroundColor Yellow
+                        Write-Host "  [!] No valid browser entries after filtering" -ForegroundColor Yellow
+                        Write-Host "  [i] Hunt-Browser may have returned only errors or empty data" -ForegroundColor Cyan
+                        Write-Host "  [i] Try: Hunt-Browser -All to test browser extraction directly" -ForegroundColor Cyan
                     }
                 }
                 catch {
-                    Write-Warning "Error processing browser results: $($_.Exception.Message)"
+                    Write-Host "  [!] Error processing browser results: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Verbose "Browser processing stack trace: $($_.ScriptStackTrace)"
                     $forensicData.Browser = @()
                 }
             }
         }
         catch {
-            Write-Host "  [!] Browser history extraction error: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "  [!] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+            Write-Host "  [!] Browser extraction error: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Verbose "Browser extraction stack trace: $($_.ScriptStackTrace)"
             $forensicData.Browser = @()
         }
     }
