@@ -4,8 +4,8 @@
 # ------------------------
 # [ Module Manifest ]
 # ======================
-# []    Hunt-ForensicDump
-# [...] Hunt-Logs
+# [...] Hunt-ForensicDump
+# [X]   Hunt-Logs
 # [X]   Hunt-Files 
 # [X]   Hunt-Persistence
 # [X]   Hunt-Browser
@@ -46,6 +46,10 @@
 # - Review and update all Synopsis/Parameters/Notes/Examples sections
 
 # - Validate CSV output for each function
+
+# - ADD clean copy with NO Suspicious IOC hardcoded strings-- in case user is getting flagged by EDR/AV
+
+# - Create Wiki Homepage, Repo Homepage, and Wiki Sidebar
 
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
@@ -123,7 +127,6 @@ $script:suspiciousFileExt = @(
     '.url',
     '.sct', '.wsh',
     '.reg',
-    #'.inf',
     '.cpl'
 )
 
@@ -275,7 +278,7 @@ $script:GlobalLogIOCs = @(
     "S4U2Self", "S4U2Proxy",
     
     # Network shares
-    "ADMIN$", "C$", "IPC$",
+    "ADMIN$", "C$\", "IPC$",
     "\\\\127.0.0.1\\C$", "\\\\localhost\\ADMIN$",
     
     # PowerShell execution flags & download cradles
@@ -12839,8 +12842,8 @@ Hunt-Logs -StartDate "2025-01-01" -EndDate "2025-01-31" -Search "powershell.exe"
 Searches January 2025 in UTC time for PowerShell IOCs in specific logs.
 
 .EXAMPLE
-Hunt-Logs -Auto 2 -OutputCSV "C:\Hunt\"
-Runs Level 2 automated hunt (30-day comprehensive) with CSV export.
+Hunt-Logs -Auto -StartDate "30D" -OutputCSV "C:\Hunt\"
+Runs automated hunt with all IOCs over last 30 days, exports to CSV.
 
 .EXAMPLE
 Hunt-Logs -StartDate "24H" -Search "lateral movement","psexec" -Aggressive "C:\Windows\Logs" -ExcludeEventId 4634,4624
@@ -12953,15 +12956,14 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     # ============================================================================
     
     # Cache regex patterns to avoid rebuilding them for each event
-    $script:CachedSearchRegex = $null
-    $script:CachedSearchReference = $null
-    $script:CachedExcludeRegex = $null
-    $script:CachedExcludeReference = $null
+    # Use hash of array content for reliable cache validation
+    if (-not (Test-Path Variable:\script:CachedSearchRegex)) {
+        $script:CachedSearchRegex = $null
+        $script:CachedSearchHash = $null
+        $script:CachedExcludeRegex = $null
+        $script:CachedExcludeHash = $null
+    }
     
-    # ============================================================================
-    # DEFENSIVE VALIDATION
-    # ============================================================================
-
     # ============================================================================
     # DEFENSIVE VALIDATION
     # ============================================================================
@@ -13632,8 +13634,8 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         Write-Warning "Not running as Administrator. Some event logs may be inaccessible, reducing detection coverage."
     }
 
-    # Initialize result collection for PassThru
-    $script:HuntLogResults = @()
+    # Initialize result collection for PassThru (PERFORMANCE: Generic.List is 30-50% faster)
+    $script:HuntLogResults = [System.Collections.Generic.List[PSObject]]::new()
 
     # Helper function to create log result object
     function New-LogResult {
@@ -13737,9 +13739,55 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         }
     }
 
+    # Timezone abbreviation function
+    function Get-TimezoneAbbreviation {
+        param($TimeZone, $DateTime)
+        
+        if ($TimeZone.Id -eq 'UTC') { 
+            return 'UTC' 
+        }
+        
+        $isDST = $TimeZone.IsDaylightSavingTime($DateTime)
+        
+        if ($TimeZone.StandardName -like "*Eastern*") { 
+            if ($isDST) { return 'EDT' } else { return 'EST' }
+        }
+        elseif ($TimeZone.StandardName -like "*Central*") { 
+            if ($isDST) { return 'CDT' } else { return 'CST' }
+        }
+        elseif ($TimeZone.StandardName -like "*Mountain*") { 
+            if ($isDST) { return 'MDT' } else { return 'MST' }
+        }
+        elseif ($TimeZone.StandardName -like "*Pacific*") { 
+            if ($isDST) { return 'PDT' } else { return 'PST' }
+        }
+        else {
+            # For unknown timezones, return UTC offset format (e.g., "UTC-5", "UTC+1")
+            try {
+                $offset = $TimeZone.GetUtcOffset($DateTime)
+                $hours = $offset.TotalHours
+                $sign = if ($hours -ge 0) { "+" } else { "" }
+                return "UTC$sign$hours"
+            }
+            catch {
+                # Final fallback - return timezone ID
+                return $TimeZone.Id
+            }
+        }
+    }
+
     # Function to parse time strings and convert to target timezone for search queries
     function ConvertTo-DateTime {
         param($InputValue, $TargetTimeZone)
+        
+        # Defensive: Validate inputs
+        if ($null -eq $InputValue) {
+            throw "ConvertTo-DateTime: InputValue cannot be null"
+        }
+        
+        if ($null -eq $TargetTimeZone) {
+            throw "ConvertTo-DateTime: TargetTimeZone cannot be null"
+        }
         
         # Get current system timezone
         $currentSystemTZ = [System.TimeZoneInfo]::Local
@@ -13806,29 +13854,11 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
         # Convert from system time to target timezone for display
         if ($TargetTimeZone.Id -eq $currentSystemTZ.Id) {
             $convertedTime = $DateTime
-            $tzAbbrev = $currentSystemTZ.StandardName.Split(' ')[0]
+            $tzAbbrev = Get-TimezoneAbbreviation -TimeZone $currentSystemTZ -DateTime $convertedTime
         }
         else {
             $convertedTime = [System.TimeZoneInfo]::ConvertTime($DateTime, $currentSystemTZ, $TargetTimeZone)
-            
-            $tzAbbrev = if ($TargetTimeZone.Id -eq 'UTC') { 
-                'UTC' 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Eastern*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'EDT' } else { 'EST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Central*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'CDT' } else { 'CST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Mountain*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'MDT' } else { 'MST' } 
-            }
-            elseif ($TargetTimeZone.StandardName -like "*Pacific*") { 
-                if ($TargetTimeZone.IsDaylightSavingTime($convertedTime)) { 'PDT' } else { 'PST' } 
-            }
-            else { 
-                $TargetTimeZone.StandardName.Split(' ')[0] 
-            }
+            $tzAbbrev = Get-TimezoneAbbreviation -TimeZone $TargetTimeZone -DateTime $convertedTime
         }
         
         return $convertedTime.ToString("yyyy-MM-dd HH:mm:ss") + " $tzAbbrev"
@@ -13839,7 +13869,19 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
     # Handle Auto mode - SIMPLIFIED VERSION
     if ($Auto) {
         Write-Host "Running in Auto Mode..." -ForegroundColor Cyan
-        Write-Host "Auto Mode: Using full IOC list ($($script:GlobalLogIOCs.Count) IOCs) with user-specified parameters" -ForegroundColor Yellow
+        
+        # Defensive: Validate IOC list exists and has content
+        if ($null -eq $script:GlobalLogIOCs -or $script:GlobalLogIOCs.Count -eq 0) {
+            Write-Warning "Auto mode enabled but GlobalLogIOCs list is empty or undefined. Falling back to manual mode."
+            Write-Warning "Define `$script:GlobalLogIOCs with IOC patterns to use Auto mode."
+            $Auto = $false
+        }
+        else {
+            Write-Host "Auto Mode: Using full IOC list ($($script:GlobalLogIOCs.Count) IOCs) with user-specified parameters" -ForegroundColor Yellow
+        }
+    }
+    
+    if ($Auto) {
         
         # Build search parameters - use ONLY what user specified
         $finalParams = @{
@@ -14287,6 +14329,9 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     
         $stringValue = $Value.ToString()
     
+        # Remove control characters (0x00-0x1F except tab, CR, LF which we handle separately)
+        $stringValue = $stringValue -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
+        
         # Remove or escape problematic characters
         $stringValue = $stringValue -replace '[\r\n]+', ' ' # Replace newlines with spaces
         $stringValue = $stringValue -replace '\t', ' '      # Replace tabs with spaces
@@ -14435,6 +14480,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     function Test-EventMatches {
         param($Event, $Search, $Exclude, $SearchXMLEnabled)
         
+        # Defensive: Validate event object
+        if ($null -eq $Event) {
+            Write-Verbose "Test-EventMatches: Received null event"
+            return $false
+        }
+        
         # Build searchable content efficiently
         $message = if ([string]::IsNullOrWhiteSpace($Event.Message)) { "" } else { $Event.Message }
         
@@ -14445,15 +14496,17 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # PRIORITY 1: If Search is specified, check for matches
         if ($Search.Count -gt 0) {
             # Build combined regex pattern (escape special chars, join with OR)
-            # PERFORMANCE: Cache based on reference equality for speed
-            if (-not $script:CachedSearchRegex -or $script:CachedSearchReference -ne $Search) {
+            # PERFORMANCE: Cache based on content hash for arrays
+            $currentSearchHash = ($Search | Sort-Object) -join '|'
+            if (-not $script:CachedSearchRegex -or $script:CachedSearchHash -ne $currentSearchHash) {
                 $escapedPatterns = $Search | ForEach-Object { [regex]::Escape($_) }
-                $script:CachedSearchRegex = ($escapedPatterns -join '|')
-                $script:CachedSearchReference = $Search
+                $regexPattern = ($escapedPatterns -join '|')
+                $script:CachedSearchRegex = [regex]::new($regexPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                $script:CachedSearchHash = $currentSearchHash
             }
             
             # Single regex match is MUCH faster than 85 -like comparisons
-            if ($message -match $script:CachedSearchRegex) {
+            if ($script:CachedSearchRegex.IsMatch($message)) {
                 return $true  # Match found in message - skip XML entirely
             }
             
@@ -14474,14 +14527,16 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # PRIORITY 2: Check Exclude only if Search didn't match or wasn't specified
         if ($Exclude.Count -gt 0 -and -not $needsXml) {
             # Build exclude regex pattern
-            # PERFORMANCE: Cache based on reference equality for speed
-            if (-not $script:CachedExcludeRegex -or $script:CachedExcludeReference -ne $Exclude) {
+            # PERFORMANCE: Cache based on content hash for arrays
+            $currentExcludeHash = ($Exclude | Sort-Object) -join '|'
+            if (-not $script:CachedExcludeRegex -or $script:CachedExcludeHash -ne $currentExcludeHash) {
                 $escapedExcludes = $Exclude | ForEach-Object { [regex]::Escape($_) }
-                $script:CachedExcludeRegex = ($escapedExcludes -join '|')
-                $script:CachedExcludeReference = $Exclude
+                $regexPattern = ($escapedExcludes -join '|')
+                $script:CachedExcludeRegex = [regex]::new($regexPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                $script:CachedExcludeHash = $currentExcludeHash
             }
             
-            if ($message -match $script:CachedExcludeRegex) {
+            if ($script:CachedExcludeRegex.IsMatch($message)) {
                 return $false  # Excluded - no need to check XML
             }
             
@@ -14556,7 +14611,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                         if ([string]::IsNullOrWhiteSpace($line)) { continue }
                         
                         $trimmedLine = $line.Trim()
-                        if ($trimmedLine -match $script:CachedSearchRegex) {
+                        if ($script:CachedSearchRegex.IsMatch($trimmedLine)) {
                             $foundMatch = $true
                             Write-Verbose "Test-EventMatches: Match found in XML"
                             break
@@ -14576,7 +14631,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                 $xmlLines = $xmlContent -split "`n"
                 foreach ($line in $xmlLines) {
                     $trimmedLine = $line.Trim()
-                    if ($trimmedLine -match $script:CachedExcludeRegex) {
+                    if ($script:CachedExcludeRegex.IsMatch($trimmedLine)) {
                         return $false  # Found in exclude
                     }
                 }
@@ -14592,6 +14647,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     function Get-EventHashKey {
         param($Event)
         
+        # Defensive: Validate event object exists
+        if ($null -eq $Event) {
+            Write-Verbose "Get-EventHashKey: Received null event"
+            return "NULL_EVENT_$(Get-Random)"
+        }
+        
         # Use RecordId as primary key when available (unique per log)
         # Only fall back to complex key for events without RecordId
         if ($Event.RecordId -and $Event.LogName) {
@@ -14599,7 +14660,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         }
         
         # Fallback for EVTX files that might not have RecordId
-        return "$($Event.LogName)|$($Event.Id)|$($Event.TimeCreated.Ticks)"
+        # Defensive: Handle missing properties
+        $logName = if ($Event.LogName) { $Event.LogName } else { "UNKNOWN" }
+        $eventId = if ($null -ne $Event.Id) { $Event.Id } else { 0 }
+        $ticks = if ($Event.TimeCreated) { $Event.TimeCreated.Ticks } else { (Get-Date).Ticks }
+        
+        return "$logName|$eventId|$ticks"
     }
 
     # Function to find matching include strings - returns formatted string of matches with locations
@@ -14607,7 +14673,13 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     function Get-MatchedStrings {
         param($Event, $Search, $SearchXMLEnabled)
         
-        if ($Search.Count -eq 0) {
+        # Defensive: Validate inputs
+        if ($null -eq $Event) {
+            Write-Verbose "Get-MatchedStrings: Received null event"
+            return ""
+        }
+        
+        if ($null -eq $Search -or $Search.Count -eq 0) {
             return ""
         }
         
@@ -14651,9 +14723,11 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             
             $foundIn = @()
             try {
-                # Use -match for faster performance (already escaped in Test-EventMatches)
+                # Use -match for faster performance (compile regex once per string)
                 $escapedPattern = [regex]::Escape($includeStr)
-                if ($message -match $escapedPattern) { 
+                $regexPattern = [regex]::new($escapedPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                
+                if ($regexPattern.IsMatch($message)) { 
                     $foundIn += "MSG" 
                 }
                 # Only check XML if SearchXML is enabled - search each line with trimming
@@ -14661,7 +14735,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                     $xmlLines = $xmlContent -split "`n"
                     foreach ($line in $xmlLines) {
                         $trimmedLine = $line.Trim()
-                        if ($trimmedLine -match $escapedPattern) {
+                        if ($regexPattern.IsMatch($trimmedLine)) {
                             $foundIn += "XML"
                             break
                         }
@@ -14693,7 +14767,8 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     function Search-AggressiveLogFiles {
         param($SearchPath, $Search, $MsgTruncateLength)
         
-        $logMatches = @()
+        # PERFORMANCE: Use ArrayList for faster collection
+        $logMatches = [System.Collections.ArrayList]::new()
         $maxFileSizeMB = 100  # Safety limit - don't scan files larger than 100MB
         
         # Check if we've already scanned C:\ and have cached results
@@ -14771,23 +14846,30 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                 $content = Get-Content -Path $logFile.FullName -ErrorAction SilentlyContinue
                 if ($null -eq $content) { continue }
                 
+                # Build regex pattern once for this file
+                $escapedPatterns = $Search | ForEach-Object { [regex]::Escape($_) }
+                $regexPattern = ($escapedPatterns -join '|')
+                $searchRegex = [regex]::new($regexPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                
                 foreach ($line in $content) {
-                    foreach ($searchString in $Search) {
-                        if ($line -like "*$searchString*") {
-                            $truncatedText = $line
-                            if ($MsgTruncateLength -gt 0 -and $line.Length -gt $MsgTruncateLength) {
-                                $truncatedText = $line.Substring(0, [math]::Max(1, $MsgTruncateLength)) + "..."
-                            }
-                            
-                            $logMatches += [PSCustomObject]@{
+                    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                    
+                    # Use regex matching for consistency and performance
+                    $match = $searchRegex.Match($line)
+                    if ($match.Success) {
+                        $truncatedText = $line
+                        if ($MsgTruncateLength -gt 0 -and $line.Length -gt $MsgTruncateLength) {
+                            $truncatedText = $line.Substring(0, [math]::Max(1, $MsgTruncateLength)) + "..."
+                        }
+                        
+                        [void]$logMatches.Add([PSCustomObject]@{
                                 FilePath         = $logFile.FullName
                                 CreationDate     = $logFile.CreationTime
                                 LastModifiedDate = $logFile.LastWriteTime
-                                Match            = $searchString
+                                Match            = $match.Value
                                 Text             = $truncatedText
-                            }
-                            break # Only add one match per line
-                        }
+                            })
+                        break # Only add one match per line
                     }
                 }
             }
@@ -14797,7 +14879,8 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         }
         
         Write-Progress -Activity "Aggressive Log Search" -Completed
-        return $logMatches
+        # Convert ArrayList to array for compatibility
+        return $logMatches.ToArray()
     }
 
     # Convert input dates with defensive error handling
@@ -15363,8 +15446,21 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
     $hasThreadIDFilter = $ThreadID.Count -gt 0
     $hasSearchOrExclude = $Search.Count -gt 0 -or $Exclude.Count -gt 0
     
+    # Progress tracking for large datasets
+    $processedCount = 0
+    $totalToFilter = $allEvents.Count
+    $lastProgressUpdate = 0
+    
     foreach ($key in $allEvents.Keys) {
         $event = $allEvents[$key]
+        $processedCount++
+        
+        # Update progress every 500 events (reduces overhead while showing activity)
+        if (($processedCount - $lastProgressUpdate) -ge 500) {
+            $percentComplete = [math]::Min(90 + (($processedCount / $totalToFilter) * 8), 98)
+            Write-Progress -Activity "Hunt-Logs Search" -Status "Filtering events: $processedCount / $totalToFilter" -PercentComplete $percentComplete
+            $lastProgressUpdate = $processedCount
+        }
         
         # FILTER 1: ExcludeEventId (highest precedence - skip immediately)
         if ($hasExcludeEventId -and $ExcludeEventId -contains $event.Id) {
@@ -15456,7 +15552,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             [string]$HighlightColor = "Red"
         )
         
-        if ([string]::IsNullOrWhiteSpace($Message) -or $SearchStrings.Count -eq 0) {
+        # Defensive: Handle null/empty inputs
+        if ([string]::IsNullOrWhiteSpace($Message)) {
+            return
+        }
+        
+        if ($null -eq $SearchStrings -or $SearchStrings.Count -eq 0) {
             Write-Host $Message -ForegroundColor $NormalColor
             return
         }
@@ -15468,22 +15569,16 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             foreach ($searchStr in $SearchStrings) {
                 if ([string]::IsNullOrWhiteSpace($searchStr)) { continue }
                 
-                # Find all occurrences of this search string (case-insensitive)
-                $position = 0
-                while ($position -lt $Message.Length) {
-                    # Use -like style matching but find exact positions
-                    $foundIndex = $Message.IndexOf($searchStr, $position, [StringComparison]::OrdinalIgnoreCase)
-                    
-                    if ($foundIndex -ge 0) {
-                        $allMatches += [PSCustomObject]@{
-                            Start = $foundIndex
-                            End   = $foundIndex + $searchStr.Length
-                            Text  = $Message.Substring($foundIndex, $searchStr.Length)
-                        }
-                        $position = $foundIndex + 1  # Move past this match to find overlapping matches
-                    }
-                    else {
-                        break  # No more matches for this search string
+                # Use compiled regex for case-insensitive matching (faster than IndexOf loop)
+                $escapedStr = [regex]::Escape($searchStr)
+                $regex = [regex]::new($escapedStr, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                $matches = $regex.Matches($Message)
+                
+                foreach ($match in $matches) {
+                    $allMatches += [PSCustomObject]@{
+                        Start = $match.Index
+                        End   = $match.Index + $match.Length
+                        Text  = $match.Value
                     }
                 }
             }
@@ -15561,7 +15656,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             [string]$HighlightColor = "Red"
         )
         
-        if ([string]::IsNullOrWhiteSpace($XmlText) -or $SearchStrings.Count -eq 0) {
+        # Defensive: Handle null/empty inputs
+        if ([string]::IsNullOrWhiteSpace($XmlText)) {
+            return
+        }
+        
+        if ($null -eq $SearchStrings -or $SearchStrings.Count -eq 0) {
             Write-Host $XmlText -ForegroundColor $NormalColor
             return
         }
@@ -15579,20 +15679,18 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                 foreach ($searchStr in $SearchStrings) {
                     if ([string]::IsNullOrWhiteSpace($searchStr)) { continue }
                     
-                    $position = 0
-                    while ($position -lt $line.Length) {
-                        $foundIndex = $line.IndexOf($searchStr, $position, [StringComparison]::OrdinalIgnoreCase)
+                    # Use compiled regex for case-insensitive matching (faster than IndexOf loop)
+                    $escapedStr = [regex]::Escape($searchStr)
+                    $regex = [regex]::new($escapedStr, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                    $matches = $regex.Matches($line)
+                    
+                    foreach ($match in $matches) {
+                        $foundIndex = $match.Index
                         
-                        if ($foundIndex -ge 0) {
-                            $allMatches += [PSCustomObject]@{
-                                Start = $foundIndex
-                                End   = $foundIndex + $searchStr.Length
-                                Text  = $line.Substring($foundIndex, $searchStr.Length)
-                            }
-                            $position = $foundIndex + 1
-                        }
-                        else {
-                            break
+                        $allMatches += [PSCustomObject]@{
+                            Start = $foundIndex
+                            End   = $foundIndex + $searchStr.Length
+                            Text  = $line.Substring($foundIndex, $searchStr.Length)
                         }
                     }
                 }
@@ -15660,7 +15758,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # Always create result object for CSV export and potential PassThru
         $matchedStrings = if (($Search.Count -gt 0) -and $logEvent.MatchedStrings) { $logEvent.MatchedStrings } else { "" }
         $logResult = New-LogResult -LogEvent $logEvent -TargetTimeZone $targetTimeZone -MatchedStrings $matchedStrings
-        $script:HuntLogResults += $logResult
+        [void]$script:HuntLogResults.Add($logResult)
 
         # Display only if not Quiet
         if (-not $Quiet) {
@@ -15836,7 +15934,7 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
         # Always collect aggressive results for CSV export
         foreach ($result in $aggressiveResults) {
             $aggressiveResult = New-LogResult -LogEvent $result -TargetTimeZone $targetTimeZone -IsAggressive $true -FilePath $result.FilePath -Match $result.Match
-            $script:HuntLogResults += $aggressiveResult
+            [void]$script:HuntLogResults.Add($aggressiveResult)
         }
 
         # Display aggressive results only if not Quiet
@@ -15899,7 +15997,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             # Validate directory exists
             $csvDir = Split-Path $csvPath -Parent
             if (![string]::IsNullOrWhiteSpace($csvDir) -and !(Test-Path $csvDir)) {
-                New-Item -Path $csvDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                try {
+                    New-Item -Path $csvDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                }
+                catch {
+                    throw "Failed to create CSV export directory '$csvDir': $($_.Exception.Message)"
+                }
             }
         
             # Export data if we have results
@@ -15907,6 +16010,12 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
                 # Sanitize data for CSV export
                 $sanitizedResults = @()
                 foreach ($result in $script:HuntLogResults) {
+                    # Defensive: Skip null results
+                    if ($null -eq $result) {
+                        Write-Verbose "CSV Export: Skipping null result"
+                        continue
+                    }
+                    
                     $sanitizedResult = [PSCustomObject]@{
                         Type             = Format-CSVValue $result.Type
                         FormattedTime    = Format-CSVValue $result.FormattedTime
@@ -15965,7 +16074,8 @@ Total Raw Size: $([math]::Round($totalSize / 1MB, 2)) MB
             if (-not $Quiet) { Write-Verbose "No results to return via PassThru" }
             return @()
         }
-        return $script:HuntLogResults
+        # Convert Generic.List to array for compatibility
+        return $script:HuntLogResults.ToArray()
     }
 
     if (-not $Quiet) {
@@ -20080,8 +20190,18 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
         elseif ($TimeZone.StandardName -like "*Pacific*") { 
             if ($isDST) { return 'PDT' } else { return 'PST' }
         }
-        else { 
-            return $TimeZone.StandardName.Split(' ')[0] 
+        else {
+            # For unknown timezones, return UTC offset format (e.g., "UTC-5", "UTC+1")
+            try {
+                $offset = $TimeZone.GetUtcOffset($DateTime)
+                $hours = $offset.TotalHours
+                $sign = if ($hours -ge 0) { "+" } else { "" }
+                return "UTC$sign$hours"
+            }
+            catch {
+                # Final fallback - return timezone ID
+                return $TimeZone.Id
+            }
         }
     }
 
