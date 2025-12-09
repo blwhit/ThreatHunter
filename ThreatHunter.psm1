@@ -30,11 +30,14 @@
 # - Hunt-ForensicDump: Add something to enumerate local admins (which accounts have Administrator privileges?)
 # - Hunt-ForensicDump: Random error "Error rendering table: Cannot read properties of undefined (reading 'toLocaleString')" <--- Random unknown log table in 'Event Logs' tab [its happening with multiple tables, might just be blank tables erroring out]
 # - Hunt-ForensicDump: Add PID and TID to event logs..
-# - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... User profile list? Firewall or antivirus settings? Services?
 # - Hunt-ForensicDump: In the Persistence tab, move the "Flag" field to the front, and sort by it (non null values at the top)
-# - Hunt-ForensicDump: remove the 'Settings' tab "Max Rows Per Table" control. it doesnt do anything helpful-- atleast tell users you can only go down... the "Max Chars Per Cell" does however work...
+# - Hunt-ForensicDump: change the 'Settings' tab "Max Rows Per Table" control. it doesnt do anything helpful-- atleast tell users you can only go down... the "Max Chars Per Cell" does however work...
 # - Hunt-ForensicDump: Might want to reorganize the tabs. Put the most used first... least used towards the right side...
+
+
 # - Hunt-ForensicDump: make sure all new sub function features are implemented corrrectly... validate that updated and new sub-functions work comprehensively 
+# - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... User profile list? Firewall or antivirus settings? Services?
+
 
 # - Make Wiki
 # - Review each funtion: Full description, Every parameter/feature/sub-function (with examples)
@@ -2926,6 +2929,34 @@ function Hunt-ForensicDump {
             Write-Host "  [-] Getting all user accounts..." -ForegroundColor DarkGray
             $sysInfo.AllUserAccounts = Get-AllUserAccounts
             
+            Write-Host "  [-] Enumerating administrator group members..." -ForegroundColor DarkGray
+            try {
+                $adminMembers = @()
+                $adminGroup = Get-LocalGroup -Name "Administrators" -ErrorAction SilentlyContinue
+                if ($adminGroup) {
+                    $members = Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue
+                    if ($members) {
+                        foreach ($member in $members) {
+                            $adminMembers += $member.Name
+                        }
+                    }
+                }
+                
+                # Mark admin status in AllUserAccounts
+                if ($sysInfo.AllUserAccounts -and $sysInfo.AllUserAccounts.Count -gt 0) {
+                    foreach ($user in $sysInfo.AllUserAccounts) {
+                        $fullUsername = "$env:COMPUTERNAME\$($user.Username)"
+                        $user | Add-Member -NotePropertyName 'IsAdministrator' -NotePropertyValue ($adminMembers -contains $fullUsername -or $adminMembers -contains $user.Username) -Force
+                    }
+                }
+                
+                $sysInfo.AdministratorMembers = $adminMembers
+            }
+            catch {
+                Write-Verbose "Administrator enumeration error: $($_.Exception.Message)"
+                $sysInfo.AdministratorMembers = @()
+            }
+            
             Write-Host "  [-] Getting currently logged in users..." -ForegroundColor DarkGray
             $sysInfo.CurrentlyLoggedIn = Get-LoggedInUsers
         
@@ -3318,8 +3349,9 @@ function Hunt-ForensicDump {
                         $jsonPath = Join-Path $jsonDir $file
                         $limitedData = $data
                         
-                        # Use Depth 2 for better performance while maintaining data integrity
-                        $jsonContent = $limitedData | ConvertTo-Json -Depth 2 -Compress -ErrorAction Stop
+                        # Use Depth 3 for nested objects (SystemInfo has nested structures)
+                        # Compress to reduce file size
+                        $jsonContent = $limitedData | ConvertTo-Json -Depth 3 -Compress -ErrorAction Stop
                         $jsonContent | Out-File -FilePath $jsonPath -Encoding UTF8 -ErrorAction Stop
                         Write-Host "  [-] Exported $file ($recordCount records)" -ForegroundColor DarkGray
                     }
@@ -3398,11 +3430,21 @@ function Hunt-ForensicDump {
         $regCount = 0
         if ($ForensicData.Registry) {
             # Registry data is now an array from Hunt-Registry, not a hashtable
-            if ($ForensicData.Registry -is [array]) {
-                $regCount = $ForensicData.Registry.Count
+            try {
+                if ($ForensicData.Registry -is [array]) {
+                    $regCount = $ForensicData.Registry.Count
+                }
+                elseif ($ForensicData.Registry -is [System.Collections.ArrayList] -or 
+                    $ForensicData.Registry -is [System.Collections.Generic.List[PSObject]]) {
+                    $regCount = $ForensicData.Registry.Count
+                }
+                elseif ($null -ne $ForensicData.Registry) {
+                    $regCount = 1
+                }
             }
-            elseif ($ForensicData.Registry) {
-                $regCount = 1
+            catch {
+                Write-Verbose "Error counting registry entries: $($_.Exception.Message)"
+                $regCount = 0
             }
         }
 
@@ -3555,10 +3597,12 @@ function Hunt-ForensicDump {
                     
                     # Method 1: Try PSObject.Properties access (safest)
                     try {
-                        $prop = $item.PSObject.Properties[$key]
-                        if ($null -ne $prop) {
-                            $propValue = $prop.Value
-                            $accessMethod = 'PSObject'
+                        if ($null -ne $item -and $null -ne $item.PSObject -and $null -ne $item.PSObject.Properties) {
+                            $prop = $item.PSObject.Properties[$key]
+                            if ($null -ne $prop) {
+                                $propValue = $prop.Value
+                                $accessMethod = 'PSObject'
+                            }
                         }
                     }
                     catch {
@@ -3903,14 +3947,22 @@ function Hunt-ForensicDump {
                         }
                     }
                     
-                    # Translate Status field (use Contains() for OrderedDictionary, not ContainsKey())
-                    if ($orderedProps.Contains('Status')) {
-                        $orderedProps['Status'] = ConvertTo-ServiceStatusString -Status $orderedProps['Status']
+                    # Translate Status field - check both hashtable and ordered dictionary
+                    if ($orderedProps -is [System.Collections.Specialized.OrderedDictionary]) {
+                        if ($orderedProps.Contains('Status')) {
+                            $orderedProps['Status'] = ConvertTo-ServiceStatusString -Status $orderedProps['Status']
+                        }
+                        if ($orderedProps.Contains('StartType')) {
+                            $orderedProps['StartType'] = ConvertTo-ServiceStartTypeString -StartType $orderedProps['StartType']
+                        }
                     }
-
-                    # Translate StartType field
-                    if ($orderedProps.Contains('StartType')) {
-                        $orderedProps['StartType'] = ConvertTo-ServiceStartTypeString -StartType $orderedProps['StartType']
+                    elseif ($orderedProps -is [hashtable]) {
+                        if ($orderedProps.ContainsKey('Status')) {
+                            $orderedProps['Status'] = ConvertTo-ServiceStatusString -Status $orderedProps['Status']
+                        }
+                        if ($orderedProps.ContainsKey('StartType')) {
+                            $orderedProps['StartType'] = ConvertTo-ServiceStartTypeString -StartType $orderedProps['StartType']
+                        }
                     }
                     
                     $servicesTranslated += [PSCustomObject]$orderedProps
@@ -4859,12 +4911,12 @@ function Hunt-ForensicDump {
             <button class="tab-button" onclick="showTab('search')">Search</button>
             <button class="tab-button" onclick="showTab('sysinfo')">System Info</button>
             <button class="tab-button" onclick="showTab('persistence')">Persistence ($($stats.Persistence))</button>
-            <button class="tab-button" onclick="showTab('registry')">Registry ($($stats.Registry))</button>
             <button class="tab-button" onclick="showTab('logs')">Event Logs ($($stats.Logs))</button>
             <button class="tab-button" onclick="showTab('browser')">Browser ($($stats.Browser))</button>
-            <button class="tab-button" onclick="showTab('services')">Services ($($stats.Services))</button>
             <button class="tab-button" onclick="showTab('tasks')">Tasks ($($stats.Tasks))</button>
+            <button class="tab-button" onclick="showTab('services')">Services ($($stats.Services))</button>
             <button class="tab-button" onclick="showTab('files')">Files ($($stats.Files))</button>
+            <button class="tab-button" onclick="showTab('registry')">Registry ($($stats.Registry))</button>
             <button class="tab-button" onclick="showTab('export')">Export Info</button>
             <button class="tab-button" onclick="showTab('settings')">Settings</button>
         </div>
@@ -5194,8 +5246,9 @@ function Hunt-ForensicDump {
                                 <th onclick="sortSystemTable('users-accounts-table', 2)" style="position: relative;">Created<div class="resizer"></div></th>
                                 <th onclick="sortSystemTable('users-accounts-table', 3)" style="position: relative;">Last Logon<div class="resizer"></div></th>
                                 <th onclick="sortSystemTable('users-accounts-table', 4)" style="position: relative;">Enabled<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('users-accounts-table', 5)" style="position: relative;">Profile Path<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('users-accounts-table', 6)" style="position: relative;">Description<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('users-accounts-table', 5)" style="position: relative;">Administrator<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('users-accounts-table', 6)" style="position: relative;">Profile Path<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('users-accounts-table', 7)" style="position: relative;">Description<div class="resizer"></div></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -5207,13 +5260,18 @@ $(
             $created = if ($user.Created) { $user.Created.ToString("yyyy-MM-dd HH:mm:ss") } else { "Unknown" }
             $lastLogon = if ($user.LastLogon) { $user.LastLogon.ToString("yyyy-MM-dd HH:mm:ss") } else { "Never" }
             $enabled = if ($null -ne $user.Enabled) { $user.Enabled.ToString() } else { "N/A" }
+            $isAdmin = if ($user.PSObject.Properties['IsAdministrator'] -and $user.IsAdministrator) { 
+                "<span style='color: #e74c3c; font-weight: bold;'>Yes</span>" 
+            } else { 
+                "<span style='color: #95a5a6;'>No</span>" 
+            }
             $profilePath = if ($user.ProfilePath) { [System.Web.HttpUtility]::HtmlEncode($user.ProfilePath) } else { "N/A" }
             $desc = if ($user.Description) { [System.Web.HttpUtility]::HtmlEncode($user.Description) } else { "" }
-            $userHtml += "                            <tr><td>$username</td><td>$($user.Type)</td><td>$created</td><td>$lastLogon</td><td>$enabled</td><td style='font-size: 0.8em;'>$profilePath</td><td>$desc</td></tr>`n"
+            $userHtml += "                            <tr><td>$username</td><td>$($user.Type)</td><td>$created</td><td>$lastLogon</td><td>$enabled</td><td style='text-align: center;'>$isAdmin</td><td style='font-size: 0.8em;'>$profilePath</td><td>$desc</td></tr>`n"
         }
         $userHtml
     } else {
-        "                            <tr><td colspan='7' style='text-align: center; color: #95a5a6;'>No user account data available</td></tr>"
+        "                            <tr><td colspan='8' style='text-align: center; color: #95a5a6;'>No user account data available</td></tr>"
     }
 )
                         </tbody>
@@ -5823,9 +5881,9 @@ $(
                 <div style="background: var(--bg-secondary); padding: 20px; border-radius: 8px; max-width: 700px; border: 1px solid var(--border-color);">
                     <div style="background: var(--bg-tertiary); padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid var(--accent-blue);">
                         <p style="color: var(--text-secondary); font-size: 0.9em; margin: 0; line-height: 1.6;">
-                            Data up to the initial MaxRows limit ($MaxRows) is embedded in this report. 
-                            These settings control how much of that embedded data is displayed in tables. 
-                            Reducing limits improves browser performance with large datasets.
+                            <strong>Important:</strong> This report contains data up to the original MaxRows limit ($MaxRows). 
+                            You can only REDUCE the display limit here, not increase it. To embed more data in the report, 
+                            re-run Hunt-ForensicDump with a higher -MaxRows parameter value.
                         </p>
                     </div>
                     
@@ -5834,7 +5892,7 @@ $(
                             <span style="font-size: 1.1em;">Maximum Rows Per Table</span>
                         </label>
                         <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px;">
-                            Limit how many records/rows display in each table. Set to 0 to show all embedded data.
+                            Limit how many records/rows display in each table. You can only REDUCE this value, not increase it beyond the original embedded data limit.
                         </p>
                         <input type="number" id="settings-maxrows" value="$MaxRows" min="0" step="100" 
                             style="width: 100%; padding: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-primary); border-radius: 4px; font-size: 1em;">
@@ -6373,12 +6431,19 @@ $(
                     sortState['registry-KeyPath'] = 'desc';
                 }
                 
-                // Auto-sort persistence by Flag (highest priority first) on initial load
+                // Auto-sort persistence: non-null Flags first, then by Flag priority
                 if (type === 'persistence' && data.length > 0) {
                     data.sort(function(a, b) {
                         var flagA = a.Flag || '';
                         var flagB = b.Flag || '';
-                        var priority = {'Critical': 5, 'High': 4, 'Medium': 3, 'Low': 2, 'Info': 1, '': 0};
+                        
+                        // Non-null flags come first
+                        if (flagA && !flagB) return -1;
+                        if (!flagA && flagB) return 1;
+                        if (!flagA && !flagB) return 0;
+                        
+                        // Both have flags - sort by priority
+                        var priority = {'Critical': 5, 'High': 4, 'Medium': 3, 'Low': 2, 'Info': 1};
                         var valA = priority[flagA] || 0;
                         var valB = priority[flagB] || 0;
                         return valB - valA;
@@ -6461,6 +6526,10 @@ $(
             var keys = [];
             var keySet = {};
             for (var i = 0; i < displayData.length; i++) {
+                // Defensive null check
+                if (!displayData[i] || typeof displayData[i] !== 'object') {
+                    continue;
+                }
                 for (var key in displayData[i]) {
                     if (displayData[i].hasOwnProperty(key) && !keySet[key]) {
                         keys.push(key);
@@ -6469,15 +6538,32 @@ $(
                 }
             }
             
-            var totalRecords = originalDataLength;
-            var displayingRecords = displayData.length;
+            // Handle case where no keys were found
+            if (keys.length === 0) {
+                content.innerHTML = '<div style="padding: 40px; text-align: center; background: var(--bg-secondary); border-radius: 8px; margin: 20px 0;">' +
+                    '<p style="color: var(--text-muted); font-size: 1.2em;">No data structure detected</p>' +
+                    '<p style="color: var(--text-dark); font-size: 0.9em;">The data for this section appears to be malformed or empty.</p>' +
+                    '</div>';
+                return;
+            }
             
-            var html = '<div class="record-count">Displaying: ' + displayingRecords.toLocaleString() + ' of ' + totalRecords.toLocaleString() + ' records</div>';
+            // Defensive: Ensure values are valid numbers
+            var totalRecords = Number(originalDataLength) || 0;
+            var displayingRecords = Number(displayData.length) || 0;
+            
+            // Handle zero/undefined cases gracefully
+            var html = '';
+            if (totalRecords === 0 || displayingRecords === 0) {
+                html = '<div class="record-count">No records to display</div>';
+            } else {
+                html = '<div class="record-count">Displaying: ' + displayingRecords.toLocaleString() + ' of ' + totalRecords.toLocaleString() + ' records</div>';
+            }
             
             // Show banner if limited by MAX_ROWS OR if displaying fewer records than total
             if (isLimited || displayingRecords < totalRecords) {
                 html += '<div style="background: linear-gradient(135deg, #f39c12, #e67e22); color: #fff; padding: 12px 20px; border-radius: 6px; margin: 10px 0; border-left: 4px solid #d35400; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">';
-                html += '<strong> Limited Display:</strong> Showing first ' + displayingRecords.toLocaleString() + ' of ' + totalRecords.toLocaleString() + ' records (' + Math.round((displayingRecords / totalRecords) * 100) + '% of total data). ';
+                var percentCoverage = totalRecords > 0 ? Math.round((displayingRecords / totalRecords) * 100) : 0;
+                html += '<strong> Limited Display:</strong> Showing first ' + displayingRecords.toLocaleString() + ' of ' + totalRecords.toLocaleString() + ' records (' + percentCoverage + '% of total data). ';
                 html += 'MAX_ROWS setting: ' + (MAX_ROWS === 0 ? 'Unlimited' : MAX_ROWS.toLocaleString()) + '. ';
                 html += 'Adjust in <strong>Settings</strong> tab or download CSV files for complete dataset.';
                 html += '</div>';
@@ -6818,6 +6904,9 @@ $(
             }
         }
 
+        // Store original MAX_ROWS value at page load (this is the embedded data limit)
+        var ORIGINAL_MAX_ROWS = MAX_ROWS;
+        
         function applySettings() {
             var newMaxRows = parseInt(document.getElementById('settings-maxrows').value) || 0;
             var newMaxChars = parseInt(document.getElementById('settings-maxchars').value) || 200;
@@ -6827,6 +6916,14 @@ $(
                 alert('Max Rows must be 0 or greater (0 = unlimited)');
                 return;
             }
+            
+            // Cap MaxRows at original embedded limit (cannot increase beyond data available)
+            if (ORIGINAL_MAX_ROWS > 0 && newMaxRows > ORIGINAL_MAX_ROWS) {
+                alert('Cannot increase Max Rows beyond original embedded limit (' + ORIGINAL_MAX_ROWS + ').\n\nYou can only reduce the display limit, not increase it.\n\nTo view more data, re-run Hunt-ForensicDump with a higher -MaxRows parameter.');
+                document.getElementById('settings-maxrows').value = ORIGINAL_MAX_ROWS;
+                return;
+            }
+            
             if (newMaxChars < 50) {
                 alert('Max Characters must be at least 50');
                 return;
@@ -7632,8 +7729,16 @@ $(
                 $LoadFromJson = Join-Path $currentPath.Path $LoadFromJson
             }
             
-            # Normalize path
+            # Normalize path and validate
             $LoadFromJson = [System.IO.Path]::GetFullPath($LoadFromJson)
+            
+            # Additional validation for invalid characters
+            $invalidChars = [System.IO.Path]::GetInvalidPathChars()
+            foreach ($char in $invalidChars) {
+                if ($LoadFromJson.Contains($char)) {
+                    throw "Path contains invalid character: $char"
+                }
+            }
             
             Write-Host "[+] Resolved path: $LoadFromJson" -ForegroundColor Green
         }
@@ -7734,6 +7839,13 @@ $(
                 
                     try {
                         $jsonContent = Get-Content -Path $filePath -Raw -ErrorAction Stop
+                        
+                        # Validate JSON content is not empty
+                        if ([string]::IsNullOrWhiteSpace($jsonContent)) {
+                            Write-Warning "$file is empty - skipping"
+                            continue
+                        }
+                        
                         $loadedData = $jsonContent | ConvertFrom-Json -ErrorAction Stop
                     
                         if ($dataType -eq 'Files') {
@@ -8044,13 +8156,19 @@ $(
                 $noFlagCount = 0
                 
                 foreach ($item in $persistenceResults) {
-                    $flagProp = $item.PSObject.Properties['Flag']
-                    
-                    if ($null -ne $flagProp -and ![string]::IsNullOrWhiteSpace($flagProp.Value)) {
-                        $flaggedCount++
+                    try {
+                        $flagProp = $item.PSObject.Properties['Flag']
+                        
+                        if ($null -ne $flagProp -and ![string]::IsNullOrWhiteSpace($flagProp.Value)) {
+                            $flaggedCount++
+                        }
+                        else {
+                            $noFlagCount++
+                        }
                     }
-                    else {
+                    catch {
                         $noFlagCount++
+                        continue
                     }
                 }
                 
@@ -8096,6 +8214,14 @@ $(
             
             try {
                 $allFiles = Hunt-Files @fileParams
+                
+                # Validate output is array
+                if ($null -eq $allFiles) {
+                    $allFiles = @()
+                }
+                elseif ($allFiles -isnot [array]) {
+                    $allFiles = @($allFiles)
+                }
             }
             catch {
                 Write-Host "  [!] File system scan encountered errors: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -8137,18 +8263,26 @@ $(
         Update-ProgressWithEstimate -Activity "Forensic Dump" -StepTimes ([ref]$progressTimes) -Status "Analyzing registry..." -PercentComplete 35
         Write-Host "[+] Analyzing registry..." -ForegroundColor Yellow
         try {
-            $forensicData.Registry = Invoke-RegistryForensics -OutputDir $csvDir
+            $regResults = Invoke-RegistryForensics -OutputDir $csvDir
             
-            if ($null -eq $forensicData.Registry) {
+            if ($null -eq $regResults) {
                 $forensicData.Registry = @()
                 Write-Host "  [!] No registry data returned" -ForegroundColor Yellow
             }
             else {
+                # Ensure it's an array
+                if ($regResults -is [array]) {
+                    $forensicData.Registry = $regResults
+                }
+                else {
+                    $forensicData.Registry = @($regResults)
+                }
                 Write-Host "  [+] Collected $($forensicData.Registry.Count) registry entries" -ForegroundColor Green
             }
         }
         catch {
             Write-Host "  [!] Registry analysis error: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Verbose "Registry error stack trace: $($_.ScriptStackTrace)"
             $forensicData.Registry = @()
         }
     }
@@ -8195,8 +8329,13 @@ $(
                 $browserParams['Auto'] = $true
             }
             
-            $browserResults = Hunt-Browser @browserParams -Verbose:$false 6>$null
-
+            $browserResults = Hunt-Browser @browserParams -Verbose:$false 6>$null 2>&1
+            
+            # Validate browser results before processing
+            if ($browserResults -and $browserResults -is [string] -and $browserResults -like "*error*") {
+                Write-Host "  [!] Browser extraction returned error message" -ForegroundColor Yellow
+                $browserResults = @()
+            }
             
             # Clear progress bars with error handling
             $progressActivities = @(
@@ -8241,14 +8380,26 @@ $(
             else {
                 try {
                     # Normalize to array regardless of input type
-                    if ($browserResults -is [array] -or $browserResults -is [System.Collections.Generic.List[PSObject]]) {
+                    if ($browserResults -is [array]) {
                         $forensicData.Browser = $browserResults
                         Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
                     }
-                    else {
+                    elseif ($browserResults -is [System.Collections.Generic.List[PSObject]] -or 
+                        $browserResults -is [System.Collections.ArrayList]) {
+                        # Convert collection to array
+                        $forensicData.Browser = @($browserResults)
+                        Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
+                    }
+                    elseif ($browserResults -is [PSCustomObject]) {
                         # Single object - wrap in array
                         $forensicData.Browser = @($browserResults)
                         Write-Host "  [+] Collected 1 browser entry" -ForegroundColor Green
+                    }
+                    else {
+                        # Unknown type - try to convert
+                        $forensicData.Browser = @($browserResults)
+                        $count = if ($forensicData.Browser) { $forensicData.Browser.Count } else { 0 }
+                        Write-Host "  [+] Collected $count browser entries" -ForegroundColor Green
                     }
                 }
                 catch {
@@ -8374,11 +8525,24 @@ $(
                 Write-Host "  [-] Monitoring $($logParams['LogNames'].Count) log providers" -ForegroundColor DarkGray
             }
             
-            $forensicData.Logs = Hunt-Logs @logParams
+            $logResults = Hunt-Logs @logParams
 
-            if ($null -eq $forensicData.Logs) {
+            if ($null -eq $logResults) {
                 $forensicData.Logs = @()
                 Write-Host "  [!] No logs returned from Hunt-Logs" -ForegroundColor Yellow
+            }
+            else {
+                # Ensure ProcessId and ThreadId fields exist for HTML report compatibility
+                foreach ($log in $logResults) {
+                    if (-not $log.PSObject.Properties['ProcessId']) {
+                        $log | Add-Member -NotePropertyName 'ProcessId' -NotePropertyValue $null -Force
+                    }
+                    if (-not $log.PSObject.Properties['ThreadId']) {
+                        $log | Add-Member -NotePropertyName 'ThreadId' -NotePropertyValue $null -Force
+                    }
+                }
+                $forensicData.Logs = $logResults
+                Write-Host "  [+] Collected $($logResults.Count) log entries" -ForegroundColor Green
             }
             else {
                 Write-Host "  [+] Collected $($forensicData.Logs.Count) log entries" -ForegroundColor Green
