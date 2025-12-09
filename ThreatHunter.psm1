@@ -8605,23 +8605,9 @@ $(
             # Call Hunt-Browser and capture results
             $browserResults = $null
             try {
-                # CRITICAL: Capture all output streams, then filter for objects only
-                # This silences Write-Host and other messages while preserving return values
-                $allOutput = @(Hunt-Browser @browserParams -ErrorAction Stop *>&1)
-                
-                # Filter out strings, error records, and informational messages - keep only objects
-                $browserResults = @($allOutput | Where-Object { 
-                    $_ -is [PSCustomObject] -or 
-                    ($_.PSObject -and $_.PSObject.Properties.Count -gt 0 -and $_ -isnot [string])
-                })
-                
-                # Flatten if we got a single-item array
-                if ($browserResults.Count -eq 1) {
-                    $browserResults = $browserResults[0]
-                }
-                elseif ($browserResults.Count -eq 0) {
-                    $browserResults = $null
-                }
+                # CRITICAL: Do NOT use 2>&1 6>$null - it prevents return values
+                # Only if you need to suppress Write-Host (which can't be redirected normally)
+                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop 2>&1 6>$null
                 
                 if ($null -eq $browserResults) {
                     Write-Verbose "Hunt-Browser returned null - will check cache"
