@@ -383,7 +383,7 @@ $script:GlobalLogIOCs = @(
 )
 
 
-# Script Helper Functions 
+# Helper Functions (Not Exported)
 # --------------------------
 function Get-FileFromCommandLine {
     param([String]$CommandLine)
@@ -2929,7 +2929,7 @@ function Hunt-ForensicDump {
             Write-Host "  [-] Getting all user accounts..." -ForegroundColor DarkGray
             $sysInfo.AllUserAccounts = Get-AllUserAccounts
             
-            Write-Host "  [-] Enumerating administrator group members (comprehensive)..." -ForegroundColor DarkGray
+            Write-Host "  [-] Enumerating administrator group..." -ForegroundColor DarkGray
             try {
                 $adminMembers = @()
                 $adminDetails = @{
@@ -5345,136 +5345,128 @@ $(
             </div>
             
             <div class="section-card">
-                <h3>Administrator Accounts (Detailed)</h3>
-                <p style="color: var(--text-muted); margin-bottom: 15px;">Comprehensive view of all administrator accounts, including nested group members and domain vs local users.</p>
-                
-                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">Local Administrators ($(if ($ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators) { $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators.Count } else { 0 }))</h4>
-$(
-    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators -and $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators.Count -gt 0) {
-        $localAdminHtml = @"
-                <div class="table-wrapper">
-                    <table id="local-admins-table">
-                        <thead>
-                            <tr>
-                                <th onclick="sortSystemTable('local-admins-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('local-admins-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('local-admins-table', 2)" style="position: relative;">SID<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('local-admins-table', 3)" style="position: relative;">Source<div class="resizer"></div></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"@
-        foreach ($admin in $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators) {
-            $name = [System.Web.HttpUtility]::HtmlEncode($admin.Name)
-            $sid = [System.Web.HttpUtility]::HtmlEncode($admin.SID)
-            $localAdminHtml += "                            <tr><td><strong>$name</strong></td><td>$($admin.Type)</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td><td>$($admin.Source)</td></tr>`n"
-        }
-        $localAdminHtml += @"
-                        </tbody>
-                    </table>
-                </div>
-"@
-        $localAdminHtml
-    } else {
-        "                <p style='color: #95a5a6;'>No local administrators found</p>"
-    }
-)
-                
-                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">Domain Administrators ($(if ($ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators) { $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators.Count } else { 0 }))</h4>
-$(
-    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators -and $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators.Count -gt 0) {
-        $domainAdminHtml = @"
-                <div class="table-wrapper">
-                    <table id="domain-admins-table">
-                        <thead>
-                            <tr>
-                                <th onclick="sortSystemTable('domain-admins-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('domain-admins-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('domain-admins-table', 2)" style="position: relative;">SID<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('domain-admins-table', 3)" style="position: relative;">Source<div class="resizer"></div></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"@
-        foreach ($admin in $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators) {
-            $name = [System.Web.HttpUtility]::HtmlEncode($admin.Name)
-            $sid = [System.Web.HttpUtility]::HtmlEncode($admin.SID)
-            $domainAdminHtml += "                            <tr><td><strong>$name</strong></td><td>$($admin.Type)</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td><td>$($admin.Source)</td></tr>`n"
-        }
-        $domainAdminHtml += @"
-                        </tbody>
-                    </table>
-                </div>
-"@
-        $domainAdminHtml
-    } else {
-        "                <p style='color: #95a5a6;'>No domain administrators found (machine may not be domain-joined)</p>"
-    }
-)
-                
-                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">Nested Groups with Admin Rights ($(if ($ForensicData.SystemInfo.AdministratorDetails.NestedGroups) { $ForensicData.SystemInfo.AdministratorDetails.NestedGroups.Count } else { 0 }))</h4>
-$(
-    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.NestedGroups -and $ForensicData.SystemInfo.AdministratorDetails.NestedGroups.Count -gt 0) {
-        $nestedGroupsHtml = @"
-                <div class="table-wrapper">
-                    <table id="nested-groups-table">
-                        <thead>
-                            <tr>
-                                <th onclick="sortSystemTable('nested-groups-table', 0)" style="position: relative;">Group Name<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('nested-groups-table', 1)" style="position: relative;">SID<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('nested-groups-table', 2)" style="position: relative;">Source<div class="resizer"></div></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-"@
-        foreach ($group in $ForensicData.SystemInfo.AdministratorDetails.NestedGroups) {
-            $name = [System.Web.HttpUtility]::HtmlEncode($group.Name)
-            $sid = [System.Web.HttpUtility]::HtmlEncode($group.SID)
-            $nestedGroupsHtml += "                            <tr><td><strong>$name</strong></td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td><td>$($group.Source)</td></tr>`n"
-        }
-        $nestedGroupsHtml += @"
-                        </tbody>
-                    </table>
-                </div>
-"@
-        $nestedGroupsHtml
-    } else {
-        "                <p style='color: #95a5a6;'>No nested groups with admin rights</p>"
-    }
-)
-                
-                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">All Members (Flattened, including nested) ($(if ($ForensicData.SystemInfo.AdministratorDetails.AllMembers) { $ForensicData.SystemInfo.AdministratorDetails.AllMembers.Count } else { 0 }))</h4>
+                <h3>Administrator Accounts</h3>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">All users and groups with administrator privileges on this system.</p>
 $(
     if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.AllMembers -and $ForensicData.SystemInfo.AdministratorDetails.AllMembers.Count -gt 0) {
-        $allMembersHtml = @"
+        $adminHtml = @"
                 <div class="table-wrapper">
-                    <table id="all-admin-members-table">
+                    <input type="text" id="admin-search" placeholder="Search administrators..." onkeyup="filterSystemTable('admin-table')" style="width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px;">
+                    <table id="admin-table">
                         <thead>
                             <tr>
-                                <th onclick="sortSystemTable('all-admin-members-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('all-admin-members-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('all-admin-members-table', 2)" style="position: relative;">Domain User<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('all-admin-members-table', 3)" style="position: relative;">Parent Group<div class="resizer"></div></th>
-                                <th onclick="sortSystemTable('all-admin-members-table', 4)" style="position: relative;">SID<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('admin-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('admin-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('admin-table', 2)" style="position: relative;">Account Type<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('admin-table', 3)" style="position: relative;">Membership<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('admin-table', 4)" style="position: relative;">Source<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('admin-table', 5)" style="position: relative;">SID<div class="resizer"></div></th>
                             </tr>
                         </thead>
                         <tbody>
 "@
-        foreach ($member in $ForensicData.SystemInfo.AdministratorDetails.AllMembers) {
-            $name = [System.Web.HttpUtility]::HtmlEncode($member.Name)
-            $sid = [System.Web.HttpUtility]::HtmlEncode($member.SID)
-            $isDomainDisplay = if ($member.IsDomain) { "<span style='color: #2ecc71; font-weight: bold;'>Yes</span>" } else { "<span style='color: #95a5a6;'>No</span>" }
-            $parentGroup = [System.Web.HttpUtility]::HtmlEncode($member.ParentGroup)
-            $allMembersHtml += "                            <tr><td><strong>$name</strong></td><td>$($member.Type)</td><td style='text-align: center;'>$isDomainDisplay</td><td>$parentGroup</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td></tr>`n"
+        
+        # Combine all admin members: Local, Domain, and from Nested Groups
+        $allAdminMembers = @()
+        
+        # Add Local Administrators
+        if ($ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators) {
+            foreach ($admin in $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators) {
+                $allAdminMembers += [PSCustomObject]@{
+                    Name        = $admin.Name
+                    Type        = $admin.Type
+                    AccountType = 'Local'
+                    Membership  = 'Direct Member'
+                    Source      = $admin.Source
+                    SID         = $admin.SID
+                    SortOrder   = 1
+                }
+            }
         }
-        $allMembersHtml += @"
+        
+        # Add Domain Administrators
+        if ($ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators) {
+            foreach ($admin in $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators) {
+                $allAdminMembers += [PSCustomObject]@{
+                    Name        = $admin.Name
+                    Type        = $admin.Type
+                    AccountType = 'Domain'
+                    Membership  = 'Direct Member'
+                    Source      = $admin.Source
+                    SID         = $admin.SID
+                    SortOrder   = 2
+                }
+            }
+        }
+        
+        # Add members from AllMembers that aren't already added (nested members)
+        if ($ForensicData.SystemInfo.AdministratorDetails.AllMembers) {
+            foreach ($member in $ForensicData.SystemInfo.AdministratorDetails.AllMembers) {
+                # Check if already added as direct member
+                $existing = $allAdminMembers | Where-Object { $_.SID -eq $member.SID }
+                if (-not $existing) {
+                    $accountType = if ($member.IsDomain) { 'Domain' } else { 'Local' }
+                    $membership = if ($member.ParentGroup -and $member.ParentGroup -ne 'Direct Member') {
+                        "Via: $($member.ParentGroup)"
+                    } else {
+                        'Direct Member'
+                    }
+                    
+                    $allAdminMembers += [PSCustomObject]@{
+                        Name        = $member.Name
+                        Type        = $member.Type
+                        AccountType = $accountType
+                        Membership  = $membership
+                        Source      = $member.Source
+                        SID         = $member.SID
+                        SortOrder   = if ($membership -eq 'Direct Member') { 
+                            if ($accountType -eq 'Local') { 1 } else { 2 }
+                        } else { 3 }
+                    }
+                }
+            }
+        }
+        
+        # Sort: Local direct members first, then domain direct members, then nested members
+        $sortedAdmins = $allAdminMembers | Sort-Object SortOrder, Name
+        
+        foreach ($admin in $sortedAdmins) {
+            $name = [System.Web.HttpUtility]::HtmlEncode($admin.Name)
+            $sid = [System.Web.HttpUtility]::HtmlEncode($admin.SID)
+            $membership = [System.Web.HttpUtility]::HtmlEncode($admin.Membership)
+            
+            # Color coding
+            $accountTypeColor = if ($admin.AccountType -eq 'Domain') { 
+                'color: #3498db;'  # Blue for domain
+            } else { 
+                'color: #2ecc71;'  # Green for local
+            }
+            
+            $membershipStyle = if ($admin.Membership -ne 'Direct Member') {
+                'color: #95a5a6; font-style: italic;'  # Gray italic for nested
+            } else {
+                'font-weight: bold;'
+            }
+            
+            $adminHtml += "                            <tr><td><strong>$name</strong></td><td>$($admin.Type)</td><td style='$accountTypeColor'>$($admin.AccountType)</td><td style='$membershipStyle'>$membership</td><td>$($admin.Source)</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td></tr>`n"
+        }
+        
+        $adminHtml += @"
                         </tbody>
                     </table>
                 </div>
+                <p style="color: var(--text-muted); margin-top: 10px; font-size: 0.9em;">
+                    <strong>Legend:</strong> 
+                    <span style="color: #2ecc71;">Local</span> = Local account | 
+                    <span style="color: #3498db;">Domain</span> = Domain account | 
+                    <strong>Bold</strong> = Direct member | 
+                    <span style="color: #95a5a6; font-style: italic;">Nested</span> = Inherited via group membership
+                </p>
 "@
-        $allMembersHtml
-    } else {
-        "                <p style='color: #95a5a6;'>No administrator members found</p>"
+        $adminHtml
+    }
+    else {
+        "                <p style='color: #95a5a6;'>No administrator accounts found</p>"
     }
 )
             </div>
@@ -8390,10 +8382,10 @@ $(
                 }
                 
                 if ($flaggedCount -gt 0) {
-                    Write-Host "  [-] $flaggedCount persistence items have flags from Hunt-Persistence" -ForegroundColor DarkGray
+                    Write-Host "  [-] $flaggedCount persistence items flagged" -ForegroundColor DarkGray
                 }
                 if ($noFlagCount -gt 0) {
-                    Write-Host "  [-] $noFlagCount persistence items have no flags (will display empty)" -ForegroundColor DarkGray
+                    Write-Host "  [-] $noFlagCount potential persistence objects unflagged" -ForegroundColor DarkGray
                 }
             }
             
@@ -8515,7 +8507,8 @@ $(
     
         # Recommend LoadTool if not using it
         if (-not $LoadBrowserTool) {
-            Write-Host "  [i] TIP: Use -LoadBrowserTool for complete and accurate browser history extraction" -ForegroundColor Cyan
+            Write-Host "  [i] RECOMMENDED: Use -LoadBrowserTool for complete and accurate browser history extraction" -ForegroundColor Cyan
+            Write-Host "  [i] Using native mode (database string extraction) - may take longer" -ForegroundColor Cyan
         }
         try {
             $browserParams = @{
@@ -8539,14 +8532,33 @@ $(
                     Write-Host "  [-] Using LoadTool mode (via NirSoft internet download)..." -ForegroundColor DarkGray
                 }
             }
-            elseif ($Aggressive) {
-                $browserParams['All'] = $true
-            }
             else {
-                $browserParams['Auto'] = $true
+                # CRITICAL: Always specify -All mode for native extraction
+                # Hunt-Browser now requires explicit mode selection
+                $browserParams['All'] = $true
+                Write-Host "  [-] Using native mode (database string extraction)..." -ForegroundColor DarkGray
             }
             
             # Redirect stderr to stdout and capture
+            # Add date range parameters if specified
+            if ($StartDate) { 
+                try {
+                    $browserParams['StartDate'] = $parsedStartDate.ToString("yyyy-MM-dd HH:mm:ss")
+                }
+                catch {
+                    Write-Verbose "Could not format StartDate for browser extraction"
+                }
+            }
+            if ($EndDate) { 
+                try {
+                    $browserParams['EndDate'] = $parsedEndDate.ToString("yyyy-MM-dd HH:mm:ss")
+                }
+                catch {
+                    Write-Verbose "Could not format EndDate for browser extraction"
+                }
+            }
+            
+            Write-Verbose "Calling Hunt-Browser with parameters: $($browserParams.Keys -join ', ')"
             $browserResults = Hunt-Browser @browserParams -Verbose:$false 2>&1 6>$null
             
             # Validate browser results before processing
@@ -8611,27 +8623,64 @@ $(
             }
             else {
                 try {
-                    # Normalize to array regardless of input type
-                    if ($browserResults -is [array]) {
-                        $forensicData.Browser = $browserResults
-                        Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
-                    }
-                    elseif ($browserResults -is [System.Collections.Generic.List[PSObject]] -or 
+                    # Filter out error records and strings
+                    $validResults = @()
+                    
+                    # Handle collections
+                    if ($browserResults -is [array] -or 
+                        $browserResults -is [System.Collections.Generic.List[PSObject]] -or 
                         $browserResults -is [System.Collections.ArrayList]) {
-                        # Convert collection to array
-                        $forensicData.Browser = @($browserResults)
-                        Write-Host "  [+] Collected $($browserResults.Count) browser entries" -ForegroundColor Green
+                        
+                        foreach ($item in $browserResults) {
+                            # Skip error records and strings
+                            if ($item -is [System.Management.Automation.ErrorRecord]) {
+                                Write-Verbose "Filtered out error record: $($item.Exception.Message)"
+                                continue
+                            }
+                            if ($item -is [string]) {
+                                # Check if it's an error message
+                                if ($item -like "*error*" -or $item -like "*failed*" -or $item -like "*exception*") {
+                                    Write-Verbose "Filtered out error string: $item"
+                                    continue
+                                }
+                            }
+                            
+                            # Valid PSObject or custom object
+                            if ($null -ne $item) {
+                                $validResults += $item
+                            }
+                        }
                     }
                     elseif ($browserResults -is [PSCustomObject]) {
-                        # Single object - wrap in array
-                        $forensicData.Browser = @($browserResults)
-                        Write-Host "  [+] Collected 1 browser entry" -ForegroundColor Green
+                        $validResults = @($browserResults)
+                    }
+                    elseif ($browserResults -is [System.Management.Automation.ErrorRecord]) {
+                        Write-Host "  [!] Browser extraction returned error: $($browserResults.Exception.Message)" -ForegroundColor Yellow
+                        $validResults = @()
+                    }
+                    elseif ($browserResults -is [string]) {
+                        if ($browserResults -like "*error*" -or $browserResults -like "*failed*") {
+                            Write-Host "  [!] Browser extraction error: $browserResults" -ForegroundColor Yellow
+                            $validResults = @()
+                        }
+                        else {
+                            # Unexpected string result
+                            Write-Verbose "Hunt-Browser returned unexpected string: $browserResults"
+                            $validResults = @()
+                        }
                     }
                     else {
-                        # Unknown type - try to convert
-                        $forensicData.Browser = @($browserResults)
-                        $count = if ($forensicData.Browser) { $forensicData.Browser.Count } else { 0 }
-                        Write-Host "  [+] Collected $count browser entries" -ForegroundColor Green
+                        # Try to convert unknown type
+                        $validResults = @($browserResults)
+                    }
+                    
+                    $forensicData.Browser = $validResults
+                    
+                    if ($validResults.Count -gt 0) {
+                        Write-Host "  [+] Collected $($validResults.Count) browser entries" -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host "  [!] No valid browser entries found" -ForegroundColor Yellow
                     }
                 }
                 catch {
@@ -8848,13 +8897,6 @@ $(
     # Generate HTML Report
     Update-ProgressWithEstimate -Activity "Forensic Dump" -StepTimes ([ref]$progressTimes) -Status "Generating HTML report..." -PercentComplete 90
     Write-Host "[+] Generating interactive HTML report..." -ForegroundColor Yellow
-
-    # ADDED: Warn about large datasets
-    $totalRecords = $stats.Persistence + $stats.Files + $stats.Registry + $stats.Browser + $stats.Logs + $stats.Services + $stats.Tasks
-    if ($totalRecords -gt 100000) {
-        Write-Warning "Large dataset detected ($totalRecords total records). HTML report may be very large."
-        Write-Warning "Generating report - this may take several minutes..."
-    }
     
     try {
         $htmlPath = Join-Path $OutputDir "ForensicReport.html"
