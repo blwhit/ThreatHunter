@@ -8554,15 +8554,25 @@ $(
             Write-Host "  [-] Calling Hunt-Browser..." -ForegroundColor DarkGray
             Write-Verbose "Hunt-Browser parameters: $($browserParams.Keys -join ', ')"
             
-            # Call Hunt-Browser - capture all output including verbose/warnings
-            $browserResults = @()
+            # Call Hunt-Browser and capture results
+            $browserResults = $null
+            $browserError = $null
             try {
-                $browserResults = Hunt-Browser @browserParams -ErrorAction SilentlyContinue 2>&1 6>$null
+                # CRITICAL: Do NOT use 2>&1 6>$null - it prevents return values
+                # Use -ErrorVariable to capture errors without blocking returns
+                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop -ErrorVariable browserError
+                
+                if ($null -eq $browserResults) {
+                    Write-Verbose "Hunt-Browser returned null - will check cache"
+                }
+                else {
+                    Write-Verbose "Hunt-Browser returned data successfully"
+                }
             }
             catch {
-                Write-Host "  [!] Hunt-Browser execution failed: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Verbose "Hunt-Browser error details: $($_.Exception.ToString())"
-                $browserResults = @()
+                Write-Host "  [!] Hunt-Browser execution error: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Verbose "Error details: $($_.Exception.ToString())"
+                $browserResults = $null
             }
             
             # Clear progress bars
@@ -8590,61 +8600,92 @@ $(
             
             # Process and validate results
             Write-Host "  [-] Processing browser results..." -ForegroundColor DarkGray
+            Write-Verbose "Result type: $(if ($null -eq $browserResults) { 'NULL' } else { $browserResults.GetType().Name })"
+            Write-Verbose "Result count: $(if ($browserResults) { if ($browserResults -is [array]) { $browserResults.Count } else { '1 (single object)' } } else { '0 (null)' })"
             
+            # CACHE RECOVERY - Check if LoadTool was used but returned null
+            if ($null -eq $browserResults -and $LoadBrowserTool) {
+                Write-Verbose "Checking for cached data after null return..."
+                
+                if ($global:HuntBrowserCache_LoadTool -and 
+                    $global:HuntBrowserCache_LoadTool.RawRecords -and 
+                    $global:HuntBrowserCache_LoadTool.RawRecords.Count -gt 0) {
+                    
+                    Write-Host "  [i] Recovering $($global:HuntBrowserCache_LoadTool.RawRecords.Count) records from cache" -ForegroundColor Cyan
+                    
+                    # Convert cached records to ForensicDump format
+                    $convertedResults = @()
+                    $currentUser = if ($env:USERNAME) { $env:USERNAME } else { "Unknown" }
+                    
+                    foreach ($row in $global:HuntBrowserCache_LoadTool.RawRecords) {
+                        try {
+                            $convertedResults += [PSCustomObject]@{
+                                User         = $currentUser
+                                Browser      = if ($row.'Web Browser') { $row.'Web Browser' } else { "Unknown" }
+                                String       = if ($row.URL) { $row.URL } else { "" }
+                                FullString   = if ($row.URL) { $row.URL } else { "" }
+                                MatchPattern = "LoadTool-Cached"
+                                Length       = if ($row.URL) { $row.URL.Length } else { 0 }
+                                Source       = "LoadTool"
+                                Hostname     = $env:COMPUTERNAME
+                                Count        = 1
+                                Title        = if ($row.Title) { $row.Title } else { "" }
+                                VisitTime    = if ($row.'Visit Time') { $row.'Visit Time' } else { "" }
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Failed to convert cached record: $($_.Exception.Message)"
+                            continue
+                        }
+                    }
+                    
+                    if ($convertedResults.Count -gt 0) {
+                        Write-Host "  [+] Recovered $($convertedResults.Count) records from cache" -ForegroundColor Green
+                        $browserResults = $convertedResults
+                    }
+                }
+            }
+            
+            # FINAL VALIDATION - Process whatever results we have
             if ($null -eq $browserResults) {
-                Write-Host "  [!] Hunt-Browser returned null" -ForegroundColor Yellow
+                Write-Host "  [!] No browser data available" -ForegroundColor Yellow
                 $forensicData.Browser = @()
             }
             elseif ($browserResults -is [array] -and $browserResults.Count -eq 0) {
-                Write-Host "  [!] Hunt-Browser returned empty array - no browser data found" -ForegroundColor Yellow
-                Write-Host "  [i] This may indicate: no browsers installed, browsers currently running (files locked), or no history data" -ForegroundColor Cyan
+                Write-Host "  [!] Browser history is empty" -ForegroundColor Yellow
                 $forensicData.Browser = @()
             }
-            else {
+            elseif ($browserResults) {
+                
                 try {
+                    # Normalize to array (simple and reliable)
+                    $resultsArray = @($browserResults)
+                    
+                    Write-Verbose "Validating $($resultsArray.Count) browser items"
+                    
                     $validResults = @()
                     
-                    # Normalize to array
-                    $resultsArray = @()
-                    if ($browserResults -is [array]) {
-                        $resultsArray = $browserResults
-                    }
-                    elseif ($browserResults -is [System.Collections.IEnumerable] -and $browserResults -isnot [string]) {
-                        $resultsArray = @($browserResults)
-                    }
-                    else {
-                        $resultsArray = @($browserResults)
-                    }
-                    
-                    Write-Verbose "Hunt-Browser returned $($resultsArray.Count) items"
-                    
-                    # Filter valid results
+                    # Filter valid results (simplified - Hunt-Browser should only return valid objects)
                     foreach ($item in $resultsArray) {
                         # Skip nulls
                         if ($null -eq $item) {
+                            Write-Verbose "Skipped null item"
                             continue
                         }
                         
-                        # Skip error records
+                        # Skip error records (shouldn't happen with proper error handling)
                         if ($item -is [System.Management.Automation.ErrorRecord]) {
                             Write-Verbose "Filtered error record: $($item.Exception.Message)"
                             continue
                         }
                         
-                        # Skip error strings
-                        if ($item -is [string]) {
-                            if ($item -like "*error*" -or $item -like "*failed*" -or $item -like "*exception*" -or [string]::IsNullOrWhiteSpace($item)) {
-                                Write-Verbose "Filtered error/empty string: $item"
-                                continue
-                            }
-                        }
-                        
-                        # Valid result - must be PSCustomObject or have properties
-                        if ($item -is [PSCustomObject] -or $item.PSObject.Properties.Count -gt 0) {
+                        # Accept PSCustomObject or any object with properties
+                        if ($item -is [PSCustomObject] -or 
+                            ($item.PSObject -and $item.PSObject.Properties.Count -gt 0)) {
                             $validResults += $item
                         }
                         else {
-                            Write-Verbose "Filtered non-object item: $($item.GetType().Name)"
+                            Write-Verbose "Skipped invalid item type: $($item.GetType().Name)"
                         }
                     }
                     
@@ -18574,6 +18615,7 @@ Returns extension objects with webRequest permissions for further analysis.
                             }
                         }
                 
+                        # CRITICAL: Explicitly return results for PassThru mode
                         return $results
                     }
                     catch {
