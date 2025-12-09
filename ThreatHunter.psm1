@@ -8606,7 +8606,9 @@ $(
             $browserResults = $null
             try {
                 # CRITICAL: Do NOT use 2>&1 6>$null - it prevents return values
-                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop -InformationAction SilentlyContinue -WarningAction SilentlyContinue
+                # Only if you need to suppress Write-Host (which can't be redirected normally)
+                $browserResults = Hunt-Browser @browserParams -ErrorAction Stop *>&1 | 
+                    Where-Object { $_ -isnot [string] -and $_ -isnot [System.Management.Automation.ErrorRecord] }
                 
                 if ($null -eq $browserResults) {
                     Write-Verbose "Hunt-Browser returned null - will check cache"
