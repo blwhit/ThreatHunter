@@ -22,7 +22,7 @@
 # - Hunt-ForensicDump: Review CSV Output files for formatting/etc.
 # - Hunt-Logs: add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
 # - Hunt-Files: Add 'Caching' functionality for file searches
-
+# - Hunt-Registry: Add '-RunMRU' switch so it easily points out clickfix attacks, easy to read clear output
 
 #   Final/Full Review & To Do
 # --------------------------------------------
@@ -2929,15 +2929,73 @@ function Hunt-ForensicDump {
             Write-Host "  [-] Getting all user accounts..." -ForegroundColor DarkGray
             $sysInfo.AllUserAccounts = Get-AllUserAccounts
             
-            Write-Host "  [-] Enumerating administrator group members..." -ForegroundColor DarkGray
+            Write-Host "  [-] Enumerating administrator group members (comprehensive)..." -ForegroundColor DarkGray
             try {
                 $adminMembers = @()
+                $adminDetails = @{
+                    LocalAdministrators  = @()
+                    DomainAdministrators = @()
+                    NestedGroups         = @()
+                    AllMembers           = @()
+                }
+                
                 $adminGroup = Get-LocalGroup -Name "Administrators" -ErrorAction SilentlyContinue
                 if ($adminGroup) {
                     $members = Get-LocalGroupMember -Group "Administrators" -ErrorAction SilentlyContinue
+                    
                     if ($members) {
                         foreach ($member in $members) {
                             $adminMembers += $member.Name
+                            
+                            $memberType = $member.ObjectClass
+                            $isDomain = $member.PrincipalSource -eq 'ActiveDirectory'
+                            $isGroup = $memberType -eq 'Group'
+                            
+                            $memberObj = [PSCustomObject]@{
+                                Name        = $member.Name
+                                Type        = $memberType
+                                SID         = $member.SID.Value
+                                Source      = $member.PrincipalSource
+                                IsDomain    = $isDomain
+                                ParentGroup = 'Direct Member'
+                            }
+                            
+                            # Categorize member
+                            if ($isGroup) {
+                                $adminDetails.NestedGroups += $memberObj
+                                
+                                # Expand nested group members recursively
+                                try {
+                                    $groupMembers = Get-LocalGroupMember -SID $member.SID -ErrorAction SilentlyContinue
+                                    if ($groupMembers) {
+                                        foreach ($groupMember in $groupMembers) {
+                                            $nestedMemberObj = [PSCustomObject]@{
+                                                Name        = $groupMember.Name
+                                                Type        = $groupMember.ObjectClass
+                                                SID         = $groupMember.SID.Value
+                                                Source      = $groupMember.PrincipalSource
+                                                IsDomain    = $groupMember.PrincipalSource -eq 'ActiveDirectory'
+                                                ParentGroup = $member.Name
+                                            }
+                                            $adminDetails.AllMembers += $nestedMemberObj
+                                        }
+                                    }
+                                }
+                                catch {
+                                    Write-Verbose "Could not expand group: $($member.Name)"
+                                }
+                            }
+                            else {
+                                # Direct user member
+                                $adminDetails.AllMembers += $memberObj
+                                
+                                if ($isDomain) {
+                                    $adminDetails.DomainAdministrators += $memberObj
+                                }
+                                else {
+                                    $adminDetails.LocalAdministrators += $memberObj
+                                }
+                            }
                         }
                     }
                 }
@@ -2951,10 +3009,17 @@ function Hunt-ForensicDump {
                 }
                 
                 $sysInfo.AdministratorMembers = $adminMembers
+                $sysInfo.AdministratorDetails = $adminDetails
             }
             catch {
                 Write-Verbose "Administrator enumeration error: $($_.Exception.Message)"
                 $sysInfo.AdministratorMembers = @()
+                $sysInfo.AdministratorDetails = @{
+                    LocalAdministrators  = @()
+                    DomainAdministrators = @()
+                    NestedGroups         = @()
+                    AllMembers           = @()
+                }
             }
             
             Write-Host "  [-] Getting currently logged in users..." -ForegroundColor DarkGray
@@ -5280,6 +5345,141 @@ $(
             </div>
             
             <div class="section-card">
+                <h3>Administrator Accounts (Detailed)</h3>
+                <p style="color: var(--text-muted); margin-bottom: 15px;">Comprehensive view of all administrator accounts, including nested group members and domain vs local users.</p>
+                
+                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">Local Administrators ($(if ($ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators) { $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators.Count } else { 0 }))</h4>
+$(
+    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators -and $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators.Count -gt 0) {
+        $localAdminHtml = @"
+                <div class="table-wrapper">
+                    <table id="local-admins-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortSystemTable('local-admins-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('local-admins-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('local-admins-table', 2)" style="position: relative;">SID<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('local-admins-table', 3)" style="position: relative;">Source<div class="resizer"></div></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+"@
+        foreach ($admin in $ForensicData.SystemInfo.AdministratorDetails.LocalAdministrators) {
+            $name = [System.Web.HttpUtility]::HtmlEncode($admin.Name)
+            $sid = [System.Web.HttpUtility]::HtmlEncode($admin.SID)
+            $localAdminHtml += "                            <tr><td><strong>$name</strong></td><td>$($admin.Type)</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td><td>$($admin.Source)</td></tr>`n"
+        }
+        $localAdminHtml += @"
+                        </tbody>
+                    </table>
+                </div>
+"@
+        $localAdminHtml
+    } else {
+        "                <p style='color: #95a5a6;'>No local administrators found</p>"
+    }
+)
+                
+                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">Domain Administrators ($(if ($ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators) { $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators.Count } else { 0 }))</h4>
+$(
+    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators -and $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators.Count -gt 0) {
+        $domainAdminHtml = @"
+                <div class="table-wrapper">
+                    <table id="domain-admins-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortSystemTable('domain-admins-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('domain-admins-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('domain-admins-table', 2)" style="position: relative;">SID<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('domain-admins-table', 3)" style="position: relative;">Source<div class="resizer"></div></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+"@
+        foreach ($admin in $ForensicData.SystemInfo.AdministratorDetails.DomainAdministrators) {
+            $name = [System.Web.HttpUtility]::HtmlEncode($admin.Name)
+            $sid = [System.Web.HttpUtility]::HtmlEncode($admin.SID)
+            $domainAdminHtml += "                            <tr><td><strong>$name</strong></td><td>$($admin.Type)</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td><td>$($admin.Source)</td></tr>`n"
+        }
+        $domainAdminHtml += @"
+                        </tbody>
+                    </table>
+                </div>
+"@
+        $domainAdminHtml
+    } else {
+        "                <p style='color: #95a5a6;'>No domain administrators found (machine may not be domain-joined)</p>"
+    }
+)
+                
+                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">Nested Groups with Admin Rights ($(if ($ForensicData.SystemInfo.AdministratorDetails.NestedGroups) { $ForensicData.SystemInfo.AdministratorDetails.NestedGroups.Count } else { 0 }))</h4>
+$(
+    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.NestedGroups -and $ForensicData.SystemInfo.AdministratorDetails.NestedGroups.Count -gt 0) {
+        $nestedGroupsHtml = @"
+                <div class="table-wrapper">
+                    <table id="nested-groups-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortSystemTable('nested-groups-table', 0)" style="position: relative;">Group Name<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('nested-groups-table', 1)" style="position: relative;">SID<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('nested-groups-table', 2)" style="position: relative;">Source<div class="resizer"></div></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+"@
+        foreach ($group in $ForensicData.SystemInfo.AdministratorDetails.NestedGroups) {
+            $name = [System.Web.HttpUtility]::HtmlEncode($group.Name)
+            $sid = [System.Web.HttpUtility]::HtmlEncode($group.SID)
+            $nestedGroupsHtml += "                            <tr><td><strong>$name</strong></td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td><td>$($group.Source)</td></tr>`n"
+        }
+        $nestedGroupsHtml += @"
+                        </tbody>
+                    </table>
+                </div>
+"@
+        $nestedGroupsHtml
+    } else {
+        "                <p style='color: #95a5a6;'>No nested groups with admin rights</p>"
+    }
+)
+                
+                <h4 style="color: var(--accent-blue); margin-top: 20px; margin-bottom: 10px;">All Members (Flattened, including nested) ($(if ($ForensicData.SystemInfo.AdministratorDetails.AllMembers) { $ForensicData.SystemInfo.AdministratorDetails.AllMembers.Count } else { 0 }))</h4>
+$(
+    if ($ForensicData.SystemInfo.AdministratorDetails -and $ForensicData.SystemInfo.AdministratorDetails.AllMembers -and $ForensicData.SystemInfo.AdministratorDetails.AllMembers.Count -gt 0) {
+        $allMembersHtml = @"
+                <div class="table-wrapper">
+                    <table id="all-admin-members-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortSystemTable('all-admin-members-table', 0)" style="position: relative;">Name<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('all-admin-members-table', 1)" style="position: relative;">Type<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('all-admin-members-table', 2)" style="position: relative;">Domain User<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('all-admin-members-table', 3)" style="position: relative;">Parent Group<div class="resizer"></div></th>
+                                <th onclick="sortSystemTable('all-admin-members-table', 4)" style="position: relative;">SID<div class="resizer"></div></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+"@
+        foreach ($member in $ForensicData.SystemInfo.AdministratorDetails.AllMembers) {
+            $name = [System.Web.HttpUtility]::HtmlEncode($member.Name)
+            $sid = [System.Web.HttpUtility]::HtmlEncode($member.SID)
+            $isDomainDisplay = if ($member.IsDomain) { "<span style='color: #2ecc71; font-weight: bold;'>Yes</span>" } else { "<span style='color: #95a5a6;'>No</span>" }
+            $parentGroup = [System.Web.HttpUtility]::HtmlEncode($member.ParentGroup)
+            $allMembersHtml += "                            <tr><td><strong>$name</strong></td><td>$($member.Type)</td><td style='text-align: center;'>$isDomainDisplay</td><td>$parentGroup</td><td style='font-family: Consolas, monospace; font-size: 0.85em;'>$sid</td></tr>`n"
+        }
+        $allMembersHtml += @"
+                        </tbody>
+                    </table>
+                </div>
+"@
+        $allMembersHtml
+    } else {
+        "                <p style='color: #95a5a6;'>No administrator members found</p>"
+    }
+)
+            </div>
+            
+            <div class="section-card">
                 <h3>Currently Logged In Users ($(if ($ForensicData.SystemInfo.CurrentlyLoggedIn) { $ForensicData.SystemInfo.CurrentlyLoggedIn.Count } else { 0 }) sessions)</h3>
                 <div class="table-wrapper">
                     <table id="loggedin-table">
@@ -6575,8 +6775,22 @@ $(
             html += '<div class="table-wrapper">';
             html += '<table id="' + type + '-table"><thead><tr>';
             
-            for (var i = 0; i < keys.length; i++) {
-                html += '<th onclick="if(!this.classList.contains(\'resizing\')) sortTable(\'' + type + '\', \'' + keys[i] + '\')" title="Click to sort by ' + keys[i] + '" style="position: relative;">' + keys[i] + '<div class="resizer" onclick="event.stopPropagation();"></div></th>';
+            // Reorder columns for persistence tab: move Flag after Classification
+            var displayKeys = keys.slice();
+            if (type === 'persistence') {
+                var flagIndex = displayKeys.indexOf('Flag');
+                var classIndex = displayKeys.indexOf('Classification');
+                
+                if (flagIndex !== -1 && classIndex !== -1 && flagIndex !== classIndex + 1) {
+                    // Remove Flag from current position
+                    displayKeys.splice(flagIndex, 1);
+                    // Insert Flag after Classification
+                    displayKeys.splice(classIndex + 1, 0, 'Flag');
+                }
+            }
+            
+            for (var i = 0; i < displayKeys.length; i++) {
+                html += '<th onclick="if(!this.classList.contains(\'resizing\')) sortTable(\'' + type + '\', \'' + displayKeys[i] + '\')" title="Click to sort by ' + displayKeys[i] + '" style="position: relative;">' + displayKeys[i] + '<div class="resizer" onclick="event.stopPropagation();"></div></th>';
             }
             
             html += '</tr></thead><tbody>';
@@ -6589,8 +6803,11 @@ $(
                 }
                 html += '<tr>';
                 
-                for (var j = 0; j < keys.length; j++) {
-                    var key = keys[j];
+                // Use reordered keys for persistence tab
+                var rowKeys = (type === 'persistence') ? displayKeys : keys;
+                
+                for (var j = 0; j < rowKeys.length; j++) {
+                    var key = rowKeys[j];
                     
                     // Access property value directly from the object
                     // Avoid using displayData[i][key] which can cause enumeration issues
@@ -8329,11 +8546,26 @@ $(
                 $browserParams['Auto'] = $true
             }
             
-            $browserResults = Hunt-Browser @browserParams -Verbose:$false 6>$null 2>&1
+            # Redirect stderr to stdout and capture
+            $browserResults = Hunt-Browser @browserParams -Verbose:$false 2>&1 6>$null
             
             # Validate browser results before processing
-            if ($browserResults -and $browserResults -is [string] -and $browserResults -like "*error*") {
-                Write-Host "  [!] Browser extraction returned error message" -ForegroundColor Yellow
+            if ($null -eq $browserResults) {
+                Write-Host "  [!] Browser extraction returned no data" -ForegroundColor Yellow
+                $browserResults = @()
+            }
+            elseif ($browserResults -is [string]) {
+                if ($browserResults -like "*error*" -or $browserResults -like "*Exception*") {
+                    Write-Host "  [!] Browser extraction returned error: $browserResults" -ForegroundColor Yellow
+                    $browserResults = @()
+                }
+                else {
+                    # Single string result - wrap in array
+                    $browserResults = @($browserResults)
+                }
+            }
+            elseif ($browserResults -is [System.Management.Automation.ErrorRecord]) {
+                Write-Host "  [!] Browser extraction error: $($browserResults.Exception.Message)" -ForegroundColor Yellow
                 $browserResults = @()
             }
             
@@ -8420,136 +8652,81 @@ $(
     }
     # Collect Event Logs
     if ($runLogs) {
-        Update-ProgressWithEstimate -Activity "Forensic Dump" -StepTimes ([ref]$progressTimes) -Status "Analyzing event logs..." -PercentComplete 55
+        Update-ProgressWithEstimate -Activity "Forensic Dump" -StepTimes ([ref]$progressTimes) -Status "Analyzing event logs..." -PercentComplete 60
         Write-Host "[+] Analyzing event logs..." -ForegroundColor Yellow
         try {
-            $logParams = @{
-                StartDate = $parsedStartDate
-                EndDate   = $parsedEndDate
-                SortOrder = "NewestFirst"
-                PassThru  = $true
-                Quiet     = $true
-                OutputCSV = Join-Path $csvDir "EventLogs.csv"
-            }
-    
-            if ($Aggressive) {
-                # Aggressive mode: search all logs without filters
-                Write-Host "  [-] Running in Aggressive mode (all logs)..." -ForegroundColor DarkGray
+            # Validate Hunt-Logs exists before calling
+            if (-not (Get-Command Hunt-Logs -ErrorAction SilentlyContinue)) {
+                Write-Warning "Hunt-Logs function not found. Skipping event log analysis."
+                $forensicData.Logs = @()
             }
             else {
-                # Auto mode: core logs + custom logs + specific Microsoft logs
-                Write-Host "  [-] Running in Auto mode (core + custom logs)..." -ForegroundColor DarkGray
+                $logParams = @{
+                    PassThru  = $true
+                    Quiet     = $true
+                    OutputCSV = Join-Path $csvDir "Logs.csv"
+                }
                 
-                $coreLogNames = @(
-                    "PowerShell",
-                    "Microsoft-Windows-PowerShell/Operational",
-                    "System",
-                    "Security",
-                    "Application"
-                )
+                # Add MaxEvents only if MaxRows is specified
+                if ($MaxRows -gt 0) {
+                    $logParams['MaxEvents'] = $MaxRows
+                }
                 
-                # Add specific Microsoft Windows logs
-                $specificMicrosoftLogs = @(
-                    "Microsoft-Windows-SMBClient/Connectivity",
-                    "Microsoft-Windows-SMBClient/Operational",
-                    "Microsoft-Windows-SMBClient/Security",
-                    "Microsoft-Windows-SMBDirect/Admin",
-                    "Microsoft-Windows-SMBServer/Connectivity",
-                    "Microsoft-Windows-SMBServer/Operational",
-                    "Microsoft-Windows-SMBServer/Security",
-                    "Microsoft-Windows-SMBWitnessClient/Admin",
-                    "Microsoft-Windows-SMBWitnessClient/Informational",
-                    "Microsoft-Windows-SmartScreen/Debug",
-                    "Microsoft-Windows-TaskScheduler/Maintenance",
-                    "Microsoft-Windows-TaskScheduler/Operational",
-                    "Microsoft-Windows-TerminalServices-LocalSessionManager/Admin",
-                    "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
-                    "Microsoft-Windows-Windows Defender/Operational",
-                    "Microsoft-Windows-Windows Defender/WHC",
-                    "Microsoft-Windows-WMI-Activity/Operational",
-                    "Microsoft-Windows-Security-Kerberos/Operational",
-                    "Microsoft-Windows-RemoteApp and Desktop Connections/Admin",
-                    "Microsoft-Windows-RemoteApp and Desktop Connections/Operational",
-                    "Microsoft-Windows-PowerShell-DesiredStateConfiguration-FileDownloadManager/Operational",
-                    "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Admin",
-                    "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational",
-                    "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin",
-                    "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational"
-                )
+                # Add date parameters - Hunt-Logs expects string format
+                if ($StartDate) { 
+                    $logParams['StartDate'] = $parsedStartDate.ToString("yyyy-MM-dd HH:mm:ss")
+                }
+                if ($EndDate) { 
+                    $logParams['EndDate'] = $parsedEndDate.ToString("yyyy-MM-dd HH:mm:ss")
+                }
                 
-                # Get custom (non-Microsoft) logs from Applications and Services Logs
-                $customLogs = @()
+                Write-Verbose "Calling Hunt-Logs with parameters: $($logParams.Keys -join ', ')"
+                
                 try {
-                    Write-Host "  [-] Enumerating custom log providers..." -ForegroundColor DarkGray
-                    $allLogs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue
-                    if ($allLogs) {
-                        # Get all logs in Applications and Services Logs that are NOT Microsoft or built-in Windows logs
-                        # This captures custom application log providers regardless of their nested folder structure
-                        $customLogs = $allLogs | Where-Object { 
-                            # Check if it's in Applications and Services Logs
-                            $_.LogName -like "Applications and Services Logs/*" -and 
-                            # Exclude Microsoft logs
-                            $_.LogName -notlike "*Microsoft*" -and 
-                            $_.LogName -notlike "*Windows*" -and
-                            # Exclude known built-in logs
-                            $_.LogName -notlike "*Hardware Events*" -and
-                            $_.LogName -notlike "*Internet Explorer*" -and
-                            $_.LogName -notlike "*Key Management Service*" -and
-                            # Only include logs with records
-                            $_.RecordCount -gt 0 -and
-                            # Make sure the log is enabled and accessible
-                            $_.IsEnabled -eq $true
-                        } | Select-Object -ExpandProperty LogName
-                        
-                        if ($customLogs -and $customLogs.Count -gt 0) {
-                            Write-Host "  [-] Found $($customLogs.Count) custom log providers (non-Microsoft/non-built-in)" -ForegroundColor DarkGray
-                            # Optionally log first few custom providers for verification
-                            if ($customLogs.Count -le 5) {
-                                $customLogs | ForEach-Object { Write-Host "      - $_" -ForegroundColor DarkGray }
-                            }
-                            else {
-                                $customLogs | Select-Object -First 3 | ForEach-Object { Write-Host "      - $_" -ForegroundColor DarkGray }
-                                Write-Host "      - ... and $($customLogs.Count - 3) more" -ForegroundColor DarkGray
+                    $logResults = Hunt-Logs @logParams
+                    
+                    # Validate output
+                    if ($null -eq $logResults) {
+                        Write-Host "  [!] Hunt-Logs returned null" -ForegroundColor Yellow
+                        $logResults = @()
+                    }
+                    elseif ($logResults -isnot [array]) {
+                        $logResults = @($logResults)
+                    }
+                    
+                    # Defensive: Ensure ProcessId and ThreadId fields exist on all log objects
+                    if ($logResults.Count -gt 0) {
+                        foreach ($logEntry in $logResults) {
+                            if ($null -ne $logEntry) {
+                                if (-not $logEntry.PSObject.Properties['ProcessId']) {
+                                    $logEntry | Add-Member -MemberType NoteProperty -Name 'ProcessId' -Value $null -Force
+                                }
+                                if (-not $logEntry.PSObject.Properties['ThreadId']) {
+                                    $logEntry | Add-Member -MemberType NoteProperty -Name 'ThreadId' -Value $null -Force
+                                }
                             }
                         }
                     }
+                    
+                    $forensicData.Logs = $logResults
+                    
+                    if ($logResults.Count -eq 0) {
+                        Write-Host "  [!] No logs returned from Hunt-Logs" -ForegroundColor Yellow
+                    }
+                    else {
+                        Write-Host "  [+] Collected $($logResults.Count) log entries" -ForegroundColor Green
+                    }
                 }
                 catch {
-                    Write-Host "  [!] Warning: Could not enumerate custom logs - $($_.Exception.Message)" -ForegroundColor Yellow
-                    Write-Verbose "Custom log enumeration error: $($_.Exception.Message)"
+                    Write-Host "  [!] Hunt-Logs execution error: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Verbose "Hunt-Logs error stack trace: $($_.ScriptStackTrace)"
+                    $forensicData.Logs = @()
                 }
-                
-                # Combine all log names
-                $logParams['LogNames'] = $coreLogNames + $specificMicrosoftLogs + $customLogs | Select-Object -Unique
-                
-                Write-Host "  [-] Monitoring $($logParams['LogNames'].Count) log providers" -ForegroundColor DarkGray
-            }
-            
-            $logResults = Hunt-Logs @logParams
-
-            if ($null -eq $logResults) {
-                $forensicData.Logs = @()
-                Write-Host "  [!] No logs returned from Hunt-Logs" -ForegroundColor Yellow
-            }
-            else {
-                # Ensure ProcessId and ThreadId fields exist for HTML report compatibility
-                foreach ($log in $logResults) {
-                    if (-not $log.PSObject.Properties['ProcessId']) {
-                        $log | Add-Member -NotePropertyName 'ProcessId' -NotePropertyValue $null -Force
-                    }
-                    if (-not $log.PSObject.Properties['ThreadId']) {
-                        $log | Add-Member -NotePropertyName 'ThreadId' -NotePropertyValue $null -Force
-                    }
-                }
-                $forensicData.Logs = $logResults
-                Write-Host "  [+] Collected $($logResults.Count) log entries" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  [+] Collected $($forensicData.Logs.Count) log entries" -ForegroundColor Green
             }
         }
         catch {
             Write-Host "  [!] Event log analysis error: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Verbose "Stack trace: $($_.ScriptStackTrace)"
             $forensicData.Logs = @()
         }
     }
@@ -8598,42 +8775,48 @@ $(
             # Remove TriggerType field and clean up TriggerTypes field
             if ($taskResults -and $taskResults.Count -gt 0) {
                 foreach ($task in $taskResults) {
-                    # Remove TriggerType field completely if it exists
-                    if ($task.PSObject.Properties['TriggerType']) {
-                        $task.PSObject.Properties.Remove('TriggerType')
+                    try {
+                        # Remove TriggerType field completely if it exists
+                        if ($task.PSObject.Properties['TriggerType']) {
+                            $task.PSObject.Properties.Remove('TriggerType')
+                        }
+                        
+                        # Clean up TriggerTypes field (note the 's' at the end)
+                        if ($task.PSObject.Properties['TriggerTypes']) {
+                            $triggerValue = $task.TriggerTypes
+                        
+                            # Handle null or empty
+                            if ($null -eq $triggerValue -or [string]::IsNullOrWhiteSpace($triggerValue.ToString())) {
+                                $task.TriggerTypes = $null
+                                continue
+                            }
+                        
+                            # Convert to string and clean
+                            $triggerStr = $triggerValue.ToString().Trim()
+                        
+                            # Check if it's just commas and spaces
+                            if ($triggerStr -match '^[\s,]+$') {
+                                $task.TriggerTypes = $null
+                                continue
+                            }
+                        
+                            # Split by comma and clean each part
+                            $parts = $triggerStr -split ',' | Where-Object { 
+                                ![string]::IsNullOrWhiteSpace($_) 
+                            } | ForEach-Object { $_.Trim() } | Select-Object -Unique
+                        
+                            # Remove duplicates and rejoin
+                            if ($parts -and $parts.Count -gt 0) {
+                                $task.TriggerTypes = ($parts -join ', ')
+                            }
+                            else {
+                                $task.TriggerTypes = $null
+                            }
+                        }
                     }
-                    
-                    # Clean up TriggerTypes field (note the 's' at the end)
-                    if ($task.PSObject.Properties['TriggerTypes']) {
-                        $triggerValue = $task.TriggerTypes
-                        
-                        # Handle null or empty
-                        if ($null -eq $triggerValue -or [string]::IsNullOrWhiteSpace($triggerValue.ToString())) {
-                            $task.TriggerTypes = $null
-                            continue
-                        }
-                        
-                        # Convert to string and clean
-                        $triggerStr = $triggerValue.ToString().Trim()
-                        
-                        # Check if it's just commas and spaces
-                        if ($triggerStr -match '^[\s,]+$') {
-                            $task.TriggerTypes = $null
-                            continue
-                        }
-                        
-                        # Split by comma and clean each part
-                        $parts = $triggerStr -split ',' | Where-Object { 
-                            ![string]::IsNullOrWhiteSpace($_) 
-                        } | ForEach-Object { $_.Trim() } | Select-Object -Unique
-                        
-                        # Remove duplicates and rejoin
-                        if ($parts -and $parts.Count -gt 0) {
-                            $task.TriggerTypes = ($parts -join ', ')
-                        }
-                        else {
-                            $task.TriggerTypes = $null
-                        }
+                    catch {
+                        Write-Verbose "Error cleaning task triggers for $($task.TaskName): $($_.Exception.Message)"
+                        continue
                     }
                 }
             }
