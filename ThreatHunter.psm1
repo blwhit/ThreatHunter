@@ -8382,7 +8382,7 @@ $(
                 }
                 
                 if ($flaggedCount -gt 0) {
-                    Write-Host "  [-] $flaggedCount persistence items flagged" -ForegroundColor DarkGray
+                    Write-Host "  [-] $flaggedCount persistence objects flagged" -ForegroundColor DarkGray
                 }
                 if ($noFlagCount -gt 0) {
                     Write-Host "  [-] $noFlagCount potential persistence objects unflagged" -ForegroundColor DarkGray
