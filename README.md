@@ -1,13 +1,12 @@
 <img width="2000" height="1000" alt="threathunter" src="https://github.com/user-attachments/assets/3af47e17-aad3-4c6d-b89d-c3ac3a4d543d" />
 
 
-PowerShell DFIR module for Windows threat hunting, forensic analysis, and incident response.
-
----
 
 ## Overview
 
-ThreatHunter is a comprehensive PowerShell toolkit designed for Digital Forensics and Incident Response (DFIR). It provides a suite of hunt functions to detect persistence mechanisms, analyze system artifacts, search event logs, and generate detailed forensic reports - all PowerShell on the command line.
+ThreatHunter is a comprehensive PowerShell toolkit designed for threat hunting, digital forensics, and incident response (DFIR). 
+
+It provides a suite of hunt functions to detect persistence mechanisms, analyze system artifacts, search event logs, and generate detailed forensic reports - all through PowerShell on the command line.
 
 ---
 
