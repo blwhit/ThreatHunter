@@ -8,6 +8,8 @@ ThreatHunter is a comprehensive PowerShell toolkit designed for threat hunting, 
 
 It provides a suite of hunt functions to detect persistence mechanisms, analyze system artifacts, search event logs, and generate detailed forensic reports - all through PowerShell on the command line.
 
+**[Read the Wiki](../../wiki)**
+
 ---
 
 ## 🎯 Core Capabilities
@@ -68,8 +70,6 @@ Hunt-Browser -LoadTool -SkipConfirmation
 ---
 
 ## 📚 Documentation
-
-Comprehensive documentation available in the **[Wiki](../../wiki)**:
 
 - **[Home](../../wiki/Home)** - Module overview and quick start
 - **[Hunt-ForensicDump](../../wiki/Hunt-ForensicDump)** - Master forensic collection
