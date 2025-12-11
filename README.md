@@ -26,23 +26,50 @@ It provides a suite of hunt functions to detect persistence mechanisms, analyze 
 | **Hunt-Tasks** | Scheduled task analysis with privilege detection |
 | **Hunt-VirusTotal** | VirusTotal API integration with auto-upload |
 
+
 ---
 
-## 🚀 Quick Start
-```powershell
-# Import module
-Import-Module ThreatHunter
+## 🔧 Installation
 
-# Quick forensic dump (recommended first step)
-Hunt-ForensicDump -StartDate "3D" -LoadBrowserTool -SkipConfirmation
+### Install the Module from PS Gallery
+```powershell
+Install-Module ThreatHunter
+
+# If having errors installing
+Install-Module ThreatHunter -Force -AllowClobber
+```
+### Install Module for Temporary Usage
+```powershell
+Install-Module ThreatHunter -Scope CurrentUser
+
+# When Done
+Uninstall-Module ThreatHunter
+```
+
+### Import the Module from File
+```powershell
+# Clone repository
+git clone https://github.com/blwhit/ThreatHunter.git
+
+# Import module
+Import-Module .\ThreatHunter.psd1
+```
+
+---
+
+## 🚀 Quick Examples
+```powershell
+
+# Quick forensic dump and Export EVTZ to ZIP
+Hunt-ForensicDump -StartDate "3D" -LoadBrowserTool -SkipConfirmation -ExportLogs
 
 # Hunt for persistence
 Hunt-Persistence -Aggressive
 
-# Search event logs
+# Search all event logs for IOCs
 Hunt-Logs -StartDate "7D" -Search "mimikatz"
 
-# Analyze browser history
+# Pull all browser history
 Hunt-Browser -LoadTool -SkipConfirmation
 ```
 
@@ -82,49 +109,6 @@ Hunt-Browser -LoadTool -SkipConfirmation
 - **[Hunt-Tasks](../../wiki/Hunt-Tasks)** - Scheduled task analysis
 - **[Hunt-VirusTotal](../../wiki/Hunt-VirusTotal)** - VirusTotal integration
 
----
-
-## 🔧 Installation
-
-### Install the Module from PS Gallery
-```powershell
-Install-Module ThreatHunter
-
-# If having errors installing
-Install-Module ThreatHunter -Force -AllowClobber
-```
-### Install Module for Temporary Usage
-```powershell
-Install-Module ThreatHunter -Scope CurrentUser
-
-# When Done
-Uninstall-Module ThreatHunter
-```
-
-### Import the Module from File
-```powershell
-# Clone repository
-git clone https://github.com/blwhit/ThreatHunter.git
-
-# Import module
-Import-Module .\ThreatHunter.psd1
-```
-
----
-
-## 💡 Example Workflow
-
-**Incident Response Triage:**
-```powershell
-# Collect forensic data and ZIP EVTX
-Hunt-ForensicDump -Aggressive -ExportLogs
-
-# Check for persistence
-Hunt-Persistence -Aggressive 
-
-# Search for IOCs in logs
-Hunt-Logs -Auto -StartDate "7D"
-```
 
 ---
 
