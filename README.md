@@ -51,6 +51,8 @@ Uninstall-Module ThreatHunter
 # Clone repository
 git clone https://github.com/blwhit/ThreatHunter.git
 
+cd .\ThreatHunter\
+
 # Import module
 Import-Module .\ThreatHunter.psd1
 ```
