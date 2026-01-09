@@ -31,14 +31,14 @@ It provides a suite of hunt functions to detect persistence mechanisms, analyze 
 
 ## 🔧 Installation
 
-### Install the Module from PS Gallery
-```powershell
-Install-Module ThreatHunter
+### Option 1 (Recommended): 
 
-# If having errors installing
+#### Install the Module from PS Gallery
+```powershell
 Install-Module ThreatHunter -Force -AllowClobber
 ```
-### Install Module for Temporary Usage
+
+#### Install Module for Temporary Usage
 ```powershell
 Install-Module ThreatHunter -Scope CurrentUser
 
@@ -46,15 +46,25 @@ Install-Module ThreatHunter -Scope CurrentUser
 Uninstall-Module ThreatHunter
 ```
 
-### Import the Module from File
+### Option 2: Import the Module from File
 ```powershell
-# Clone repository
 git clone https://github.com/blwhit/ThreatHunter.git
 
 cd .\ThreatHunter\
 
-# Import module
 Import-Module .\ThreatHunter.psd1
+```
+
+### Troubleshooting Errors:
+
+#### Problem- Execution Policy is Blocking Module
+```
+Import-Module : File 'ThreatHunter.psm1' cannot be loaded because running scripts is disabled on this system.
+```
+
+#### Fix- Temporarily set execution policy for the current PowerShell session.
+```powershell
+Set-ExecutionPolicy Unrestricted -Scope Process
 ```
 
 ---
@@ -125,9 +135,10 @@ Hunt-Browser -LoadTool -SkipConfirmation
 
 ## 🔗 Resources
 
-- **Wiki Documentation**: [Link](../../wiki)
+- **PowerShell Gallery**: https://www.powershellgallery.com/packages/ThreatHunter/1.0
+- **Wiki Documentation**: [View the Wiki](../../wiki)
 - **MITRE ATT&CK**: https://attack.mitre.org
-- **Issue Tracker**: [Link](../../issues)
+- **Issue Tracker**: [Submit an Issue](../../issues)
 
 ---
 
