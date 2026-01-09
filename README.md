@@ -57,12 +57,12 @@ Import-Module .\ThreatHunter.psd1
 
 ### Troubleshooting Errors:
 
-#### Problem- Execution Policy is Blocking Module
+#### [Problem] Execution Policy is Blocking Module
 ```
 Import-Module : File 'ThreatHunter.psm1' cannot be loaded because running scripts is disabled on this system.
 ```
 
-#### Fix- Temporarily set execution policy for the current PowerShell session.
+#### [Fix] Temporarily set execution policy for the current PowerShell session.
 ```powershell
 Set-ExecutionPolicy Unrestricted -Scope Process
 ```
