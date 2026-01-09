@@ -144,4 +144,4 @@ Hunt-Browser -LoadTool -SkipConfirmation
 
 **Author**: [Blake White]  
 **Version**: 1.0  
-**Last Updated**: December 2025
+**Last Updated**: Janruary 2026
