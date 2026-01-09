@@ -2,62 +2,6 @@
 # ----------------------------------------------------------------
 # ThreatHunter
 # ------------------------
-# [ Module Manifest ]
-# ======================
-# [...] Hunt-ForensicDump
-# [X]   Hunt-Logs
-# [X]   Hunt-Files 
-# [X]   Hunt-Persistence
-# [X]   Hunt-Browser
-# [X]   Hunt-VirusTotal
-# [X]   Hunt-Services
-# [X]   Hunt-Tasks
-# [X]   Hunt-Registry
-# -----------------------------
-
-#   Function Reviews and Future Features:
-# ========================================
-# - Hunt-ForensicDump: add a switch for "-onlyjson" for outputting only that main JSON file that can be used for building reports offline (make sure that always has all the rows all data?)
-# - Hunt-ForensicDump: could add a filtering type of feature, where you can color rows... right click and color red or green, etc... then add filter button to show all filtered... excel style
-# - Hunt-ForensicDump: add a base64 string of the Compressed Arrchive of all EVTX logs? That way you will always have all event logs..... is this possible?
-# - Hunt-ForensicDump: Review CSV Output files for formatting/etc.
-# - Hunt-Logs: add a native "-Page" or "-Paging" switch to the Hunt-Logs (and maybe Hunt-Files) function (paging ability while keeping coloring)
-# - Hunt-Files: Add 'Caching' functionality for file searches?
-
-# - Hunt-Registry: Add '-RunMRU' switch so it easily points out clickfix attacks, easy to read clear output
-
-
-#   Final/Full Review & To Do
-# --------------------------------------------
-# - Hunt-ForensicDump: Combine the "Export Info" and "Settings" page... might want to add more settings if applicable
-# - Hunt-ForensicDump: Review logic for getting DNS and Domain Controller servers
-
-
-
-
-# - Hunt-ForensicDump: make sure all new sub function features are implemented corrrectly... validate that updated and new sub-functions work comprehensively 
-# - Hunt-ForensicDump: research and add any more interesting Registry Key/Values to the reg colelction. Pretty thin now. e.g. UAC values, RDP settings, etc.... User profile list? Firewall or antivirus settings? Services?
-
-
-# - Make Wiki
-# - Review each funtion: Full description, Every parameter/feature/sub-function (with examples)
-# - Full review of usage and every parameter/feature audit
-
-# - Finalize suspicious/IOC string lists
-
-# - Rename and standardize any variable names (loadtool vs loadbrowsertool, etc.)
-# - Review and update all Synopsis/Parameters/Notes/Examples sections
-
-# - Validate CSV output for each function
-
-# - ADD clean copy with NO Suspicious IOC hardcoded strings-- in case user is getting flagged by EDR/AV
-
-# - Create Wiki Homepage, Repo Homepage, and Wiki Sidebar
-
-# ----------------------------------------------------------------
-# ----------------------------------------------------------------
-# ----------------------------------------------------------------
-
 
 # Script Variables
 # -------------------
@@ -1171,7 +1115,7 @@ function Hunt-ForensicDump {
         
         [Parameter(Mandatory = $false)]
         [string]$LoadToolPath = "",
-    
+
         [Parameter(Mandatory = $false)]
         [string]$LoadFromJson = ""
     )
@@ -6065,7 +6009,7 @@ $(
                             Limit how many records/rows display in each table. You can only REDUCE this value, not increase it beyond the original embedded data limit.
                         </p>
                         <input type="number" id="settings-maxrows" value="$MaxRows" min="0" step="100" 
-                            style="width: 100%; padding: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-primary); border-radius: 4px; font-size: 1em;">
+                            style="width: 200px; padding: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-primary); border-radius: 4px; font-size: 1em;">
                         <p style="color: var(--text-dark); font-size: 0.85em; margin-top: 8px;">
                             Currently displaying: <span id="current-maxrows" style="color: var(--accent-blue); font-weight: bold;">$(if ($MaxRows -eq 0) { 'All' } else { $MaxRows })</span> rows per table
                         </p>
@@ -6079,19 +6023,21 @@ $(
                             Text longer than this limit will be truncated with "..." Hover over truncated cells to see preview of content.
                         </p>
                         <input type="number" id="settings-maxchars" value="$MaxChars" min="50" step="50" 
-                            style="width: 100%; padding: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-primary); border-radius: 4px; font-size: 1em;">
+                            style="width: 200px; padding: 10px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-primary); border-radius: 4px; font-size: 1em;">
                         <p style="color: var(--text-dark); font-size: 0.85em; margin-top: 8px;">
                             Currently truncating at: <span id="current-maxchars" style="color: var(--accent-blue); font-weight: bold;">$MaxChars</span> characters
                         </p>
                     </div>
                 </div>
                 
-                <button onclick="applySettings()" 
-                    style="width: 100%; padding: 15px; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1.1em; font-weight: bold; transition: background 0.3s;"
-                    onmouseover="this.style.background='var(--accent-blue-hover)'"
-                    onmouseout="this.style.background='var(--accent-blue)'">
-                    Apply Settings
-                </button>
+                <div style="text-align: center;">
+                    <button onclick="applySettings()" 
+                        style="width: 300px; padding: 15px; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1.1em; font-weight: bold; transition: background 0.3s;"
+                        onmouseover="this.style.background='var(--accent-blue-hover)'"
+                        onmouseout="this.style.background='var(--accent-blue)'">
+                        Apply Settings
+                    </button>
+                </div>
 
                 <div style="margin-top: 15px; padding: 12px; background: var(--bg-tertiary); border-radius: 4px; border-left: 4px solid var(--accent-yellow);">
                     <p style="color: var(--text-secondary); font-size: 0.85em; margin: 0; line-height: 1.5;">
@@ -9271,7 +9217,7 @@ https://attack.mitre.org/tactics/TA0003/
     # Initialize variables
     $script:globalPersistenceObjectArray = [System.Collections.Generic.List[PSCustomObject]]::new()
     $ErrorActionPreference = 'SilentlyContinue'
-    $hostname = ([Net.Dns]::GetHostByName($env:computerName)).HostName
+    $hostname = $env:COMPUTERNAME
     $psProperties = @('PSChildName', 'PSDrive', 'PSParentPath', 'PSPath', 'PSProvider')
     
     $systemAndUsersHives = [Collections.ArrayList]::new()
@@ -9615,7 +9561,7 @@ https://attack.mitre.org/tactics/TA0003/
             if ($Mode -eq "Auto" -and $Signature -eq "[FILE_NOT_FOUND]") { return $true }
 
             #special exception to treat expired Microsoft signature as valid
-            if ($Mode -eq "Auto" -and $Signature -eq "[VALID_EXPIRED]*Issuer: Microsoft*") { return $true }
+            if ($Mode -eq "Auto" -and $Signature -like "*[VALID_EXPIRED]*Issuer: Microsoft*") { return $true }
 
             # Check for both VALID and VALID_EXPIRED patterns
             return ($Signature -match '\[VALID[^\]]*\]')
@@ -11530,7 +11476,7 @@ https://attack.mitre.org/tactics/TA0003/
         }
     }
 
-    function Get-WMIEventsSubscrition {
+    function Get-WMIEventsSubscription {
         Write-Verbose "$hostname - Checking WMI Subscriptions..."
     
         try {
@@ -12687,7 +12633,7 @@ https://attack.mitre.org/tactics/TA0003/
             if (-not $Quiet) { Write-Progress -Activity "Hunt-Persistence" -Status "Getting Error Handler..." -PercentComplete 60 }
             Get-ErrorHandlerCmd
             if (-not $Quiet) { Write-Progress -Activity "Hunt-Persistence" -Status "Getting WMI Events..." -PercentComplete 62 }
-            Get-WMIEventsSubscrition
+            Get-WMIEventsSubscription
             if (-not $Quiet) { Write-Progress -Activity "Hunt-Persistence" -Status "Getting TS Initial Program..." -PercentComplete 64 }
             Get-TSInitialProgram
             if (-not $Quiet) { Write-Progress -Activity "Hunt-Persistence" -Status "Getting Accessibility Tools..." -PercentComplete 66 }
@@ -12887,7 +12833,7 @@ https://attack.mitre.org/tactics/TA0003/
                 }
                 'WMIEventsSubscrition' { 
                     if (-not $Quiet) { Write-Progress -Activity "Hunt-Persistence" -Status "Getting WMI Events..." -PercentComplete 50 }
-                    Get-WMIEventsSubscrition
+                    Get-WMIEventsSubscription
                     break 
                 }
                 'AppPaths' { 
@@ -14142,7 +14088,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 LastModifiedDate = $LogEvent.LastModifiedDate
                 Match            = $Match  # This is correct
                 Text             = $LogEvent.Text
-                Hostname         = ([Net.Dns]::GetHostByName($env:computerName)).HostName
+                Hostname         = $env:COMPUTERNAME
                 TimeCreated      = $null
                 FormattedTime    = ""
                 LogName          = "FileSystem"
@@ -14181,7 +14127,7 @@ Default Behavior: Without date parameters, retrieves ALL available logs with no 
                 ProcessId        = $LogEvent.ProcessId
                 ThreadId         = $LogEvent.ThreadId
                 UserId           = $LogEvent.UserId
-                Hostname         = ([Net.Dns]::GetHostByName($env:computerName)).HostName
+                Hostname         = $env:COMPUTERNAME
                 FilePath         = ""      # Always blank for EventLog
                 FileName         = ""      # Always blank for EventLog  
                 CreationDate     = $null   # Always null for EventLog
@@ -18925,21 +18871,21 @@ Returns extension objects with webRequest permissions for further analysis.
                                 $firefoxExtensions = Get-ChildItem $extDir -File -Filter "*.xpi" -ErrorAction SilentlyContinue
                                 
                                 foreach ($xpiFile in $firefoxExtensions) {
+                                    $zip = $null
+                                    $stream = $null
+                                    $reader = $null
                                     try {
                                         $extId = $xpiFile.BaseName
-                                        
+
                                         # Try to read manifest from XPI (it's a ZIP file)
                                         Add-Type -AssemblyName System.IO.Compression.FileSystem
                                         $zip = [System.IO.Compression.ZipFile]::OpenRead($xpiFile.FullName)
                                         $manifestEntry = $zip.Entries | Where-Object { $_.Name -eq "manifest.json" } | Select-Object -First 1
-                                        
+
                                         if ($manifestEntry) {
                                             $stream = $manifestEntry.Open()
                                             $reader = New-Object System.IO.StreamReader($stream)
                                             $manifestJson = $reader.ReadToEnd()
-                                            $reader.Close()
-                                            $stream.Close()
-                                            $zip.Dispose()
                                             
                                             $manifest = $manifestJson | ConvertFrom-Json
                                             
@@ -18991,13 +18937,15 @@ Returns extension objects with webRequest permissions for further analysis.
                                                 Hostname    = $Hostname
                                             }
                                         }
-                                        else {
-                                            $zip.Dispose()
-                                        }
                                     }
                                     catch {
                                         Write-Verbose "Failed to process Firefox extension: $($xpiFile.Name) - $($_.Exception.Message)"
-                                        continue
+                                    }
+                                    finally {
+                                        # Ensure resources are always released
+                                        if ($null -ne $reader) { try { $reader.Dispose() } catch { } }
+                                        if ($null -ne $stream) { try { $stream.Dispose() } catch { } }
+                                        if ($null -ne $zip) { try { $zip.Dispose() } catch { } }
                                     }
                                 }
                             }
@@ -19802,7 +19750,7 @@ Returns extension objects with webRequest permissions for further analysis.
         try {
             $userProfiles = Get-UserProfiles
             $allExtensions = @()
-            $fullhostname = ([Net.Dns]::GetHostByName($env:computerName)).HostName
+            $fullhostname = $env:COMPUTERNAME
             $hostname = if ($fullhostname) { $fullhostname } else { "Unknown" }
             
             foreach ($userProfile in $userProfiles) {
@@ -19956,7 +19904,7 @@ Returns extension objects with webRequest permissions for further analysis.
     $script:AllFilesToCleanup = @()
     $script:CreatedDirectories = @()
     $script:PersistentFiles = @()
-    $fullhostname = ([Net.Dns]::GetHostByName($env:computerName)).HostName
+    $fullhostname = $env:COMPUTERNAME
     $hostname = if ($fullhostname) { $fullhostname } else { "Unknown" }
     
     # Display date filter info (LoadTool/LoadCSV mode only, not for cache searches)
@@ -20483,10 +20431,11 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
     
         [Parameter(Mandatory = $false)]
         [int]$MaxPrint = 0,
-    
+
         [Parameter(Mandatory = $false)]
-        [switch]$Auto,
-    
+        [ValidateSet(0, 1, 2, 3)]
+        [int]$Auto = 0,
+
         [Parameter(Mandatory = $false)]
         [string]$Type = "",
     
@@ -20716,12 +20665,13 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
 
         # Remove or escape problematic characters
         $stringValue = $stringValue -replace '"', '""'  # Escape quotes
-        $stringValue = $stringValue -replace '^=', "'="  # Prevent formula injection
-        $stringValue = $stringValue -replace '^@', "'@"  # Prevent formula injection
-        $stringValue = $stringValue -replace '^\+', "'+"  # Prevent formula injection
-        $stringValue = $stringValue -replace '^-', "'-"  # Prevent formula injection
-        $stringValue = $stringValue -replace '\r\n|\r|\n', ' '  # Replace line breaks
+        $stringValue = $stringValue -replace '\r\n|\r|\n', ' '  # Replace line breaks first
         $stringValue = $stringValue -replace '\t', ' '  # Replace tabs
+
+        # Prevent formula injection - check AFTER removing line breaks
+        if ($stringValue -match '^[=@+\-\t|]') {
+            $stringValue = "'" + $stringValue
+        }
 
         return $stringValue
     }
@@ -20798,15 +20748,15 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
     # LNK shortcut resolution function
     function Get-LnkTarget {
         param($LnkPath)
-        
+
+        $shell = $null
+        $shortcut = $null
+
         try {
             $shell = New-Object -ComObject WScript.Shell
             $shortcut = $shell.CreateShortcut($LnkPath)
             $targetPath = $shortcut.TargetPath
-            
-            # Release COM object
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
-            
+
             if (![string]::IsNullOrWhiteSpace($targetPath) -and (Test-Path $targetPath -ErrorAction SilentlyContinue)) {
                 return $targetPath
             }
@@ -20814,6 +20764,15 @@ Requires PowerShell 5.0 or later. Administrator privileges recommended for compl
         }
         catch {
             return ""
+        }
+        finally {
+            # Ensure COM objects are always released
+            if ($null -ne $shortcut) {
+                try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shortcut) | Out-Null } catch { }
+            }
+            if ($null -ne $shell) {
+                try { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null } catch { }
+            }
         }
     }
 
@@ -22131,13 +22090,17 @@ function Hunt-Tasks {
                     }
                     
                     $hash = $null
+                    $stream = $null
                     try {
                         $hash = [System.Security.Cryptography.SHA256]::Create()
-                        $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
-                        $hashBytes = $hash.ComputeHash($fileBytes)
+                        $stream = [System.IO.File]::OpenRead($FilePath)
+                        $hashBytes = $hash.ComputeHash($stream)
                         return [BitConverter]::ToString($hashBytes).Replace('-', '').ToLower()
                     }
                     finally {
+                        if ($null -ne $stream) {
+                            $stream.Dispose()
+                        }
                         if ($null -ne $hash) {
                             $hash.Dispose()
                         }
@@ -22332,10 +22295,20 @@ function Hunt-Tasks {
     process {
         try {
             # Get all scheduled tasks
-            $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue
-            
-            if ($null -eq $tasks) {
-                Write-Host "[ERROR]: Unable to retrieve scheduled tasks. Administrative privileges may be required." -ForegroundColor Red
+            $tasks = $null
+            try {
+                $tasks = Get-ScheduledTask -ErrorAction Stop
+            }
+            catch {
+                Write-Host "[ERROR]: Unable to retrieve scheduled tasks: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "[!] Administrative privileges may be required." -ForegroundColor Yellow
+                if ($PassThru) { return @() }
+                return
+            }
+
+            if ($null -eq $tasks -or $tasks.Count -eq 0) {
+                Write-Host "[ERROR]: No scheduled tasks found or unable to retrieve tasks." -ForegroundColor Red
+                if ($PassThru) { return @() }
                 return
             }
             
@@ -22421,7 +22394,13 @@ function Hunt-Tasks {
                 
                 try {
                     # Get task file path and details
-                    $taskFilePath = Join-Path $env:windir "System32\Tasks\$($task.TaskPath.TrimStart('\'))\$($task.TaskName)"
+                    $trimmedPath = $task.TaskPath.TrimStart('\')
+                    $taskFilePath = if ($task.TaskPath -eq '\') {
+                        Join-Path $env:windir "System32\Tasks\$($task.TaskName)"
+                    }
+                    else {
+                        Join-Path $env:windir "System32\Tasks\$trimmedPath$($task.TaskName)"
+                    }
                     $taskFileDetails = Get-FileDetails -FilePath $taskFilePath
                     
                     # Get task information
@@ -23097,12 +23076,12 @@ function Hunt-Tasks {
 function Hunt-Registry {
     <#
 .SYNOPSIS
-Hunt-Registry searches Windows registry for specified strings and autorun persistence locations. Default Mode: RunKeys.
+Hunt-Registry searches Windows registry for specified strings, autorun persistence locations, and Run MRU entries. Default Mode: RunKeys.
 
 .DESCRIPTION
 Hunt-Registry is a DFIR function that searches the Windows registry for specified strings across keys, values, and data. 
-It can also enumerate all autorun registry locations commonly used for persistence. The function supports searching 
-specific registry hives, loading unloaded user profiles, and exporting results to CSV format.
+It can enumerate autorun registry locations commonly used for persistence, and retrieve Run MRU entries for ClickFix detection. 
+The function supports searching specific registry hives, loading unloaded user profiles, and exporting results to CSV format.
 
 Default Behavior: When called without parameters, Hunt-Registry runs in RunKeys mode to enumerate autorun locations.
 
@@ -23124,6 +23103,9 @@ Significantly improves performance by limiting search scope.
 
 .PARAMETER RunKeys
 Switch to retrieve all autorun registry locations instead of searching for specific strings. This is the default mode when no Search parameter is provided.
+
+.PARAMETER RunMRU
+Switch to retrieve all Run MRU entries for all users. Useful for detecting ClickFix attacks and analyzing recently executed commands via Win+R dialog. Includes suspicious indicator detection.
 
 .PARAMETER LoadHives
 Switch to load unloaded user registry hives. Requires administrator privileges.
@@ -23164,6 +23146,14 @@ Searches only the specified registry path for "malware", improving performance.
 .EXAMPLE
 Hunt-Registry -Search "*.exe" -Path "Software\Microsoft\Windows\*\Run*" -Hive HKLM
 Searches Run keys under Windows using wildcard paths for scoped analysis.
+
+.EXAMPLE
+Hunt-Registry -RunMRU
+Retrieves all Run MRU entries for all users with ClickFix attack detection.
+
+.EXAMPLE
+Hunt-Registry -RunMRU -OutputCSV "C:\DFIR\Analysis\" -PassThru
+Retrieves Run MRU entries, exports to CSV, and returns PowerShell objects for further analysis.
 #>
     [CmdletBinding()]
     param(
@@ -23183,6 +23173,9 @@ Searches Run keys under Windows using wildcard paths for scoped analysis.
 
         [Parameter(Mandatory = $false)]
         [switch]$RunKeys,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$RunMRU,
 
         [Parameter(Mandatory = $false)]
         [switch]$LoadHives,
@@ -23865,6 +23858,199 @@ Searches Run keys under Windows using wildcard paths for scoped analysis.
 
         return $runResults
     }
+    function Get-RunMRUEntries {
+        $runMRUResults = @()
+        
+        try {
+            if (-not $Quiet) {
+                Write-Progress -Activity "Retrieving Run MRU Entries" -Status "Processing user hives" -PercentComplete 0
+            }
+            
+            # Get all user SIDs from HKU
+            $userSIDs = @()
+            try {
+                $hkuPath = "Registry::HKEY_USERS"
+                $userSIDs = Get-ChildItem -Path $hkuPath -ErrorAction SilentlyContinue | 
+                Where-Object { $_.PSChildName -match '^S-1-5-21-[\d-]+$' } | 
+                Select-Object -ExpandProperty PSChildName
+            }
+            catch {
+                Write-Verbose "Could not enumerate user SIDs from HKU: $($_.Exception.Message)"
+            }
+            
+            # Add current user if not already included
+            try {
+                $currentUserSID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+                if ($currentUserSID -and $userSIDs -notcontains $currentUserSID) {
+                    $userSIDs += $currentUserSID
+                }
+            }
+            catch {
+                Write-Verbose "Could not get current user SID: $($_.Exception.Message)"
+            }
+            
+            if ($userSIDs.Count -eq 0) {
+                Write-Warning "No user SIDs found to enumerate RunMRU"
+                return $runMRUResults
+            }
+            
+            $userCount = 0
+            $totalUsers = $userSIDs.Count
+            
+            foreach ($sid in $userSIDs) {
+                $userCount++
+                
+                if (-not $Quiet -and $totalUsers -gt 0) {
+                    $percentComplete = [math]::Round(($userCount / $totalUsers) * 100)
+                    Write-Progress -Activity "Retrieving Run MRU Entries" -Status "Processing user $userCount of $totalUsers" -PercentComplete $percentComplete
+                }
+                
+                try {
+                    # Construct RunMRU registry path
+                    $runMRUPath = "Registry::HKEY_USERS\$sid\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"
+                    
+                    # Check if path exists
+                    if (-not (Test-Path $runMRUPath -ErrorAction SilentlyContinue)) {
+                        Write-Verbose "RunMRU path not found for SID: $sid"
+                        continue
+                    }
+                    
+                    # Get RunMRU properties
+                    $runMRUProps = Get-ItemProperty -Path $runMRUPath -ErrorAction SilentlyContinue
+                    
+                    if ($null -eq $runMRUProps) {
+                        Write-Verbose "No RunMRU entries found for SID: $sid"
+                        continue
+                    }
+                    
+                    # Try to resolve SID to username
+                    $username = "Unknown"
+                    try {
+                        $objSID = New-Object System.Security.Principal.SecurityIdentifier($sid)
+                        $objUser = $objSID.Translate([System.Security.Principal.NTAccount])
+                        $username = $objUser.Value
+                    }
+                    catch {
+                        $username = $sid
+                        Write-Verbose "Could not resolve SID to username: $sid"
+                    }
+                    
+                    # Get MRU order (e.g., "acb" means a is most recent, then c, then b)
+                    $mruOrder = $runMRUProps.MRUList
+                    
+                    # Get all command entries (single letters a-z)
+                    $commandEntries = $runMRUProps.PSObject.Properties | Where-Object { 
+                        $_.Name -match '^[a-z]$' -and ![string]::IsNullOrWhiteSpace($_.Value)
+                    }
+                    
+                    if (-not $commandEntries -or $commandEntries.Count -eq 0) {
+                        Write-Verbose "No command entries found in RunMRU for user: $username"
+                        continue
+                    }
+                    
+                    # Sort by MRU order if available
+                    if (![string]::IsNullOrWhiteSpace($mruOrder)) {
+                        $orderedEntries = @()
+                        foreach ($char in $mruOrder.ToCharArray()) {
+                            $entry = $commandEntries | Where-Object { $_.Name -eq $char.ToString() } | Select-Object -First 1
+                            if ($entry) {
+                                $orderedEntries += $entry
+                            }
+                        }
+                        # Add any entries not in MRU list
+                        foreach ($entry in $commandEntries) {
+                            if ($entry.Name -notin $mruOrder.ToCharArray()) {
+                                $orderedEntries += $entry
+                            }
+                        }
+                        $commandEntries = $orderedEntries
+                    }
+                    
+                    # Process each command entry
+                    $index = 1
+                    foreach ($entry in $commandEntries) {
+                        try {
+                            # Remove the \1 terminator if present
+                            $command = $entry.Value -replace '\\1$', ''
+                            
+                            if (![string]::IsNullOrWhiteSpace($command)) {
+                                # Analyze command for suspicious patterns (ClickFix detection)
+                                $suspiciousIndicators = @()
+                                
+                                # Check for encoded commands
+                                if ($command -match '-enc|-encodedcommand|-e\s+[A-Za-z0-9+/=]{20,}') {
+                                    $suspiciousIndicators += "Base64 Encoded Command"
+                                }
+                                
+                                # Check for PowerShell with common obfuscation
+                                if ($command -match 'powershell|pwsh' -and $command -match '-w\s+hidden|-windowstyle\s+hidden|-nop|-noprofile|-ep\s+bypass|-executionpolicy\s+bypass') {
+                                    $suspiciousIndicators += "PowerShell Hidden/Bypass"
+                                }
+                                
+                                # Check for direct URL downloads
+                                if ($command -match 'http://|https://|ftp://') {
+                                    $suspiciousIndicators += "Contains URL"
+                                }
+                                
+                                # Check for mshta, rundll32, regsvr32 (common LOLBins)
+                                if ($command -match 'mshta|rundll32|regsvr32|wscript|cscript|msiexec') {
+                                    $suspiciousIndicators += "LOLBin Detected"
+                                }
+                                
+                                # Check for IEX/Invoke-Expression
+                                if ($command -match 'iex|invoke-expression|invoke-webrequest|downloadstring') {
+                                    $suspiciousIndicators += "Remote Execution Pattern"
+                                }
+                                
+                                # Check for clipboard access (common in ClickFix)
+                                if ($command -match 'get-clipboard|\[windows\.forms\.clipboard\]|clip\.exe') {
+                                    $suspiciousIndicators += "Clipboard Access"
+                                }
+                                
+                                # Check for unusual characters or obfuscation
+                                if ($command -match '[`\^]{3,}|\$\{[^\}]+\}|%[a-z0-9]+%.*%[a-z0-9]+%') {
+                                    $suspiciousIndicators += "Obfuscation Detected"
+                                }
+                                
+                                $runMRUResults += [PSCustomObject]@{
+                                    Hostname             = $hostname
+                                    User                 = $username
+                                    SID                  = $sid
+                                    Order                = $index
+                                    Key                  = $entry.Name
+                                    Command              = $command
+                                    SuspiciousIndicators = if ($suspiciousIndicators.Count -gt 0) { $suspiciousIndicators -join '; ' } else { $null }
+                                    KeyPath              = $runMRUPath
+                                }
+                                
+                                $index++
+                            }
+                        }
+                        catch {
+                            Write-Verbose "Error processing RunMRU entry $($entry.Name) for user $username : $($_.Exception.Message)"
+                            continue
+                        }
+                    }
+                }
+                catch {
+                    Write-Verbose "Error processing RunMRU for SID $sid : $($_.Exception.Message)"
+                    continue
+                }
+            }
+            
+            if (-not $Quiet) {
+                Write-Progress -Activity "Retrieving Run MRU Entries" -Completed
+            }
+        }
+        catch {
+            Write-Warning "Error retrieving RunMRU entries: $($_.Exception.Message)"
+            if (-not $Quiet) {
+                Write-Progress -Activity "Retrieving Run MRU Entries" -Completed
+            }
+        }
+        
+        return $runMRUResults
+    }
 
     function Write-ColoredRegistryResult {
         param($RegistryResult)
@@ -23941,6 +24127,39 @@ Searches Run keys under Windows using wildcard paths for scoped analysis.
 
     }
 
+    function Write-ColoredRunMRUResult {
+        param($RunMRUResult)
+        
+        if (-not $RunMRUResult) { return }
+        
+        Write-Host ""
+        Write-Host "----------------------------------------" -ForegroundColor Gray
+        
+        Write-Host "User             : " -NoNewline -ForegroundColor Yellow
+        Write-Host $RunMRUResult.User -ForegroundColor Cyan
+        
+        Write-Host "Order            : " -NoNewline -ForegroundColor Yellow
+        Write-Host "$($RunMRUResult.Order) (Key: $($RunMRUResult.Key))" -ForegroundColor White
+        
+        Write-Host "Command          : " -NoNewline -ForegroundColor Yellow
+        
+        # Truncate command if too long
+        $displayCommand = $RunMRUResult.Command
+        if ($displayCommand.Length -gt 500) {
+            $displayCommand = $displayCommand.Substring(0, 500) + "...[TRUNCATED]"
+        }
+        
+        # Color command based on suspicious indicators
+        if ($RunMRUResult.SuspiciousIndicators) {
+            Write-Host $displayCommand -ForegroundColor Red
+            Write-Host "SUSPICIOUS       : " -NoNewline -ForegroundColor Red
+            Write-Host $RunMRUResult.SuspiciousIndicators -ForegroundColor Red
+        }
+        else {
+            Write-Host $displayCommand -ForegroundColor White
+        }
+    }
+
     # Get registry hives using shared helper
     try {
         if (Get-Command Get-RegistryHivesForAnalysis -ErrorAction SilentlyContinue) {
@@ -23969,10 +24188,18 @@ Searches Run keys under Windows using wildcard paths for scoped analysis.
         Write-Verbose "Starting Hunt-Registry execution..."
         
         # Determine mode: Default to RunKeys if no Search specified
-        $effectiveRunKeysMode = $RunKeys -or ($Search.Count -eq 0)
+        $effectiveRunKeysMode = $RunKeys -or ($Search.Count -eq 0 -and -not $RunMRU)
         
-        # Handle RunKeys mode (default mode when no Search provided)
-        if ($effectiveRunKeysMode) {
+        # Handle RunMRU mode
+        if ($RunMRU) {
+            if (-not $Quiet) {
+                Write-Host "[INFO] Retrieving Run MRU entries for all users..." -ForegroundColor Yellow
+            }
+            
+            $results = Get-RunMRUEntries
+        }
+        # Handle RunKeys mode (default mode when no Search provided and no RunMRU)
+        elseif ($effectiveRunKeysMode) {
             if (-not $Quiet) {
                 Write-Host "[INFO] Retrieving all autorun registry locations..." -ForegroundColor Yellow
             }
@@ -24034,10 +24261,19 @@ Searches Run keys under Windows using wildcard paths for scoped analysis.
         # Display results
         if ($results.Count -gt 0) {
             if (-not $Quiet) {
-                Write-Host "`n[RESULTS] Found $($results.Count) registry matches" -ForegroundColor Green
-                
-                foreach ($result in $results) {
-                    Write-ColoredRegistryResult $result
+                if ($RunMRU) {
+                    Write-Host "`n[RESULTS] Found $($results.Count) Run MRU entries" -ForegroundColor Green
+                    
+                    foreach ($result in $results) {
+                        Write-ColoredRunMRUResult $result
+                    }
+                }
+                else {
+                    Write-Host "`n[RESULTS] Found $($results.Count) registry matches" -ForegroundColor Green
+                    
+                    foreach ($result in $results) {
+                        Write-ColoredRegistryResult $result
+                    }
                 }
                 
                 # Print closing separator
@@ -24459,23 +24695,36 @@ function Hunt-Services {
         
         $services = Get-Service -ErrorAction Stop
         if ($Type -ne 'All') {
-            $services = $services | Where-Object { $_.StartType -eq $Type }
+            $services = $services | Where-Object {
+                if ($Type -eq 'Automatic') {
+                    $_.StartType -in @('Automatic', 'AutomaticDelayedStart')
+                }
+                else {
+                    $_.StartType -eq $Type
+                }
+            }
+        }
+
+        # Bulk retrieve CIM instances for better performance
+        $allServiceDetails = @{}
+        Get-CimInstance -ClassName Win32_Service -ErrorAction SilentlyContinue | ForEach-Object {
+            $allServiceDetails[$_.Name] = $_
         }
 
         $results = [System.Collections.Generic.List[PSObject]]::new()
         $totalServices = $services.Count
         $processedCount = 0
         $matchCount = 0
-        
+
         foreach ($service in $services) {
             $processedCount++
-            
+
             if ($processedCount % 50 -eq 0) {
                 Write-Progress -Activity "Processing Services" -Status "$processedCount of $totalServices" -PercentComplete (($processedCount / $totalServices) * 100)
             }
-            
+
             try {
-                $serviceDetails = Get-CimInstance -ClassName Win32_Service -Filter "Name='$($service.Name)'" -ErrorAction SilentlyContinue
+                $serviceDetails = $allServiceDetails[$service.Name]
                 
                 if (-not (Test-ServiceMatches -Service $service -ServiceDetails $serviceDetails -Search $Search)) {
                     continue
@@ -24514,7 +24763,7 @@ function Hunt-Services {
                     ExecutablePath = $truePath
                     SHA256         = $sha256
                     LastModified   = $lastModified
-                    Dependencies   = if ($service.DependentServices -and $service.DependentServices.Count -gt 0) { ($service.DependentServices.Name -join '; ') } else { $null }
+                    Dependencies   = if ($service.ServicesDependedOn -and $service.ServicesDependedOn.Count -gt 0) { ($service.ServicesDependedOn.Name -join '; ') } else { $null }
                     CanStop        = $service.CanStop
                     Hostname       = $env:COMPUTERNAME
                 }
@@ -24542,7 +24791,7 @@ function Hunt-Services {
                     $results = [System.Collections.Generic.List[PSObject]]::new(
                         ($results | Sort-Object { 
                             if ($_.LastModified) { 
-                                [DateTime]::ParseExact($_.LastModified, "yyyy-MM-dd HH:mm:ss", $null) 
+                                [DateTime]::ParseExact($_.LastModified, "yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture) 
                             } 
                             else { 
                                 [DateTime]::MinValue 
@@ -24555,7 +24804,7 @@ function Hunt-Services {
                     $results = [System.Collections.Generic.List[PSObject]]::new(
                         ($results | Sort-Object { 
                             if ($_.LastModified) { 
-                                [DateTime]::ParseExact($_.LastModified, "yyyy-MM-dd HH:mm:ss", $null) 
+                                [DateTime]::ParseExact($_.LastModified, "yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture) 
                             } 
                             else { 
                                 [DateTime]::MaxValue 
