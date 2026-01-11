@@ -31,9 +31,7 @@ It provides a suite of hunt functions to detect persistence mechanisms, analyze 
 
 ## 🔧 Installation
 
-### Option 1 (Recommended): 
-
-#### Install the Module from PS Gallery
+### Option 1: Install the Module from PS Gallery
 ```powershell
 Install-Module ThreatHunter -Force -AllowClobber
 ```
@@ -46,13 +44,20 @@ Install-Module ThreatHunter -Scope CurrentUser
 Uninstall-Module ThreatHunter
 ```
 
-### Option 2: Import the Module from File
+### Option 2: Install from Git
 ```powershell
 git clone https://github.com/blwhit/ThreatHunter.git
 
 cd .\ThreatHunter\
 
 Import-Module .\ThreatHunter.psd1
+```
+
+### Option 3: Install from Web Request
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/blwhit/ThreatHunter/refs/heads/main/ThreatHunter.psm1" -OutFile "ThreatHunter.psm1"
+
+Import-Module ".\ThreatHunter.psm1"
 ```
 
 ### Troubleshooting Errors:
