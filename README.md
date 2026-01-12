@@ -34,11 +34,15 @@ It provides a suite of hunt functions to detect persistence mechanisms, analyze 
 ### Option 1: Install the Module from PS Gallery
 ```powershell
 Install-Module ThreatHunter -Force -AllowClobber
+
+Import-Module ThreatHunter
 ```
 
 #### Install Module for Temporary Usage
 ```powershell
 Install-Module ThreatHunter -Scope CurrentUser
+
+Import-Module ThreatHunter
 
 # When Done
 Uninstall-Module ThreatHunter
